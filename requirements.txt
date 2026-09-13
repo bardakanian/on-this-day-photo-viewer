@@ -1,0 +1,4 @@
+Pillow
+pillow-heif
+imageio-ffmpeg
+
