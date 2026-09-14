@@ -1,38 +1,49 @@
-# On This Day Photo Viewer
+# On This Day
 
-A privacy-friendly, cross-platform Python desktop application that resurfaces photos and videos captured on the same calendar day across different years.
+A privacy-friendly macOS desktop app for rediscovering photos and videos captured on the same calendar day in years past.
 
-Built and iterated through AI-assisted vibe coding, with hands-on testing and refinement on both Windows and macOS.
+The current version replaces the original Tkinter prototype with a polished, modular PySide6 interface while preserving the existing media index, thumbnail cache, and saved library settings.
 
-## Why I built it
+## Highlights
 
-Large personal media libraries make it difficult to rediscover older moments. This application turns an ordinary local photo folder into an "on this day" experience without uploading personal media to a cloud service.
+- Recursively indexes a local folder of photos and videos
+- Groups matches by capture year for the selected month and day
+- Switches between all media, photos only, and videos only
+- Moves to the previous day, next day, or today
+- Displays a responsive thumbnail gallery with collapsible year sections
+- Loads large year groups in batches to keep the interface responsive
+- Includes a searchable, sortable video library
+- Opens media in the operating system's default application
+- Supports system, light, and dark appearance modes
+- Runs indexing and thumbnail generation away from the main interface
+- Reuses cached records for unchanged files and removes stale index entries
+- Stores all application data locally
 
-## Features
+## What's new
 
-- Recursively indexes photos and videos from a folder you choose
-- Groups matching media by capture year for the selected month and day
-- Reads image EXIF dates and video metadata, with platform-aware fallbacks
-- Supports common image formats plus HEIC/HEIF when `pillow-heif` is installed
-- Generates and caches thumbnails for responsive browsing
-- Uses SQLite to avoid re-indexing unchanged files
-- Runs indexing and thumbnail work in the background to keep the interface responsive
-- Filters results by photos, videos, or all media
-- Navigates to previous, current, and next calendar days
-- Expands large year groups incrementally with "load more" behavior
-- Includes a searchable video index viewer
-- Opens selected media in the operating system's default application
-- Stores its index, thumbnails, and preferences locally
+- Rebuilt desktop interface using PySide6 and the Qt Fusion style
+- Modular source layout for core indexing, storage, media handling, themes, pages, dialogs, and reusable widgets
+- Live scan progress showing checked, updated, and cached items
+- Improved empty states, status messages, error dialogs, and application logging
+- Searchable table view for all indexed videos
+- Theme preference with system, light, and dark options
+- Compatibility with the existing `~/.on_this_day_photo_viewer` data directory and thumbnail signature
+- Basic automated coverage for settings, database filtering, and indexing
 
-## Technology
+## Requirements
 
-- Python
-- Tkinter / ttk
+- Python 3.10 or newer
+- macOS for the primary supported desktop experience
+- Read access to the folder containing your media
+
+Python dependencies are installed from `requirements.txt`:
+
+- PySide6
 - Pillow
 - pillow-heif
 - imageio-ffmpeg
-- SQLite
-- Threading and `ThreadPoolExecutor`
+
+`pillow-heif` enables HEIC/HEIF files. `imageio-ffmpeg` supplies FFmpeg support for video metadata and thumbnails. The app still starts if either optional capability is unavailable, but the related media features are limited.
 
 ## Installation
 
@@ -45,18 +56,9 @@ cd on-this-day-photo-viewer
 
 ### 2. Create a virtual environment
 
-macOS:
-
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-```
-
-Windows PowerShell:
-
-```powershell
-py -m venv .venv
-.venv\Scripts\Activate.ps1
 ```
 
 ### 3. Install dependencies
@@ -66,54 +68,89 @@ python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
 ```
 
-### 4. Run the application
+### 4. Run the app
 
 ```bash
 python app.py
 ```
 
-On first launch, choose the local folder containing your media. Initial indexing time depends on the size of the library. Later scans reuse the SQLite index and cached thumbnails.
+On first launch, choose the folder containing your photos and videos. The initial scan may take time for a large library. Later scans reuse the SQLite index and skip unchanged files.
+
+## Using the app
+
+The main gallery shows media captured on the selected month and day, organized into year sections from newest to oldest.
+
+- Use **Choose Folder** to select or change the media library.
+- Use **Rescan** after adding, removing, or editing files.
+- Use the date controls to browse adjacent calendar days or return to today.
+- Use the media filter to show all items, photos, or videos.
+- Select **Video Library** to search and sort every indexed video.
+- Double-click a gallery item or video row to open it in the default application.
+- Open **Settings** to follow the system appearance or choose light or dark mode.
+
+## Keyboard shortcuts
+
+On macOS, Qt displays the Control shortcuts below using the Command key where appropriate.
+
+| Action | Shortcut |
+| --- | --- |
+| Choose media folder | `⌘O` |
+| Rescan library | `⌘R` |
+| Previous day | `⌘←` |
+| Next day | `⌘→` |
+| Go to today | `⌘T` |
+| Open video library | `⌘⇧V` |
+| Search videos | `⌘F` |
+| Open settings | `⌘,` |
+| Close window | `⌘W` |
 
 ## Supported media
 
-Images: JPG, JPEG, PNG, TIFF, BMP, GIF, WebP, HEIC, and HEIF.
+**Images:** JPG, JPEG, PNG, TIFF, BMP, GIF, WebP, HEIC, and HEIF.
 
-Videos: MOV, MP4, M4V, AVI, MKV, WMV, MPEG, MPG, and 3GP.
+**Videos:** MOV, MP4, M4V, AVI, MKV, WMV, MPEG, MPG, and 3GP.
 
-## Privacy
+Capture dates are determined from image EXIF data or embedded video metadata when available. On macOS, Spotlight metadata is also checked. Filesystem creation or modification timestamps provide fallbacks.
 
-The application processes media locally. It does not contain analytics, advertising, account sign-in, or cloud-upload functionality.
+## Local data and privacy
 
-Local application data is stored in:
+Media processing stays on your computer. The app has no analytics, advertising, account sign-in, or cloud upload functionality.
+
+Application data is stored in:
 
 ```text
 ~/.on_this_day_photo_viewer/
+├── config.json
+├── on_this_day.log
+├── photo_index.sqlite3
+└── thumbnails/
 ```
 
-That directory may contain absolute paths from the selected media library and should never be committed to source control.
+This directory can contain absolute paths from your media library and should not be committed to source control. The app reads and opens source media; it does not intentionally modify the selected files.
 
-## Cross-platform notes
+## Project structure
 
-- macOS can use Spotlight metadata as an additional capture-date source.
-- Windows uses available embedded metadata and filesystem timestamps as fallbacks.
-- Opening a media item uses the native operating-system command.
-- Video thumbnails and metadata depend on the FFmpeg binary supplied by `imageio-ffmpeg`.
+```text
+app.py                    Compatibility entry point and application startup
+onthisday/
+├── core/                 Settings, SQLite storage, indexing, and media metadata
+└── ui/
+    ├── pages/            Gallery and video library
+    ├── theme/            Colors, metrics, typography, and stylesheets
+    └── widgets/          Flow layout, media cards, and shared controls
+tests/                    Core storage and indexing tests
+```
 
-## Development approach
+## Development
 
-This project began as an AI-assisted vibe-coding experiment. I directed the feature design, refined prompts, tested the generated behavior, debugged platform differences, and iterated on indexing, caching, date detection, and interface responsiveness.
+Run the test suite from the project root:
 
-The current implementation is intentionally maintained as a single-file prototype. A future version could separate indexing, metadata extraction, persistence, thumbnail generation, and interface code into individual modules.
+```bash
+python -m unittest discover -s tests
+```
 
-## Roadmap
-
-- Package native installers for Windows and macOS
-- Add automated tests for capture-date fallbacks
-- Split the application into focused modules
-- Add configurable thumbnail sizes and gallery columns
-- Improve duplicate detection and index diagnostics
+The application writes unexpected errors to `~/.on_this_day_photo_viewer/on_this_day.log`.
 
 ## Project status
 
-Active prototype. Test with a backed-up media library and review detected dates before relying on the index for organization decisions. The application reads and opens source media; it does not intentionally modify the selected media files.
-
+Active development. Test with a backed-up media library and review detected capture dates before relying on the index for organization decisions.
