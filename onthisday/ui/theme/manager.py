@@ -37,4 +37,5 @@ class ThemeManager(QObject):
     def eventFilter(self, watched, event):
         if event.type() == QEvent.Type.ApplicationPaletteChange and self.preference == "system":
             self.app.setStyleSheet(build_stylesheet(self.colors))
+            self.changed.emit(self.preference)
         return super().eventFilter(watched, event)

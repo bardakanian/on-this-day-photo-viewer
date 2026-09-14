@@ -13,6 +13,7 @@ The current version replaces the original Tkinter prototype with a polished, mod
 - Displays a responsive thumbnail gallery with collapsible year sections
 - Loads large year groups in batches to keep the interface responsive
 - Includes a searchable, sortable video library
+- Provides folder-specific Library Insights without rescanning the filesystem
 - Opens media in the operating system's default application
 - Supports system, light, and dark appearance modes
 - Runs indexing and thumbnail generation away from the main interface
@@ -26,6 +27,7 @@ The current version replaces the original Tkinter prototype with a polished, mod
 - Live scan progress showing checked, updated, and cached items
 - Improved empty states, status messages, error dialogs, and application logging
 - Searchable table view for all indexed videos
+- Library Insights dashboard with totals, busiest day, largest year, most active month, and a media-by-year chart
 - Theme preference with system, light, and dark options
 - Compatibility with the existing `~/.on_this_day_photo_viewer` data directory and thumbnail signature
 - Basic automated coverage for settings, database filtering, and indexing
@@ -85,8 +87,23 @@ The main gallery shows media captured on the selected month and day, organized i
 - Use the date controls to browse adjacent calendar days or return to today.
 - Use the media filter to show all items, photos, or videos.
 - Select **Video Library** to search and sort every indexed video.
+- Select **Library Insights** to explore analytics for the current media folder.
 - Double-click a gallery item or video row to open it in the default application.
 - Open **Settings** to follow the system appearance or choose light or dark mode.
+
+## Library Insights
+
+Open **Library Insights** from the toolbar or the **View** menu to analyze the currently selected media folder using the existing SQLite index. No filesystem rescan is required.
+
+The page shows:
+
+- Total indexed photos, videos, and combined media
+- The busiest calendar day across all capture years, including February 29
+- The capture year containing the most indexed media
+- A chronological stacked bar chart with separate photo and video counts by year and exact hover values
+- The most active calendar month across all capture years
+
+Records missing date components are excluded only from the relevant date-based calculation and still count toward the library totals. Ties select the earliest calendar day, year, or month.
 
 ## Keyboard shortcuts
 
@@ -100,6 +117,7 @@ On macOS, Qt displays the Control shortcuts below using the Command key where ap
 | Next day | `⌘→` |
 | Go to today | `⌘T` |
 | Open video library | `⌘⇧V` |
+| Open Library Insights | `⌘⇧I` |
 | Search videos | `⌘F` |
 | Open settings | `⌘,` |
 | Close window | `⌘W` |
@@ -135,7 +153,7 @@ app.py                    Compatibility entry point and application startup
 onthisday/
 ├── core/                 Settings, SQLite storage, indexing, and media metadata
 └── ui/
-    ├── pages/            Gallery and video library
+    ├── pages/            Gallery, video library, and Library Insights
     ├── theme/            Colors, metrics, typography, and stylesheets
     └── widgets/          Flow layout, media cards, and shared controls
 tests/                    Core storage and indexing tests

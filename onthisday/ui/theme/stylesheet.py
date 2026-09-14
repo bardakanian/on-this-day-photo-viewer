@@ -16,6 +16,7 @@ def build_stylesheet(c: Palette) -> str:
     QLabel[subtle="true"] {{ color: {c.text_subtle}; font-size: {Typography.CAPTION}px; }}
     QLabel[role="title"] {{ font-size: {Typography.TITLE}px; font-weight: 600; }}
     QLabel[role="section"] {{ font-size: {Typography.SECTION}px; font-weight: 600; }}
+    QLabel[role="insightValue"] {{ font-size: 27px; font-weight: 650; }}
     QLabel[role="badge"] {{ background: {c.surface_alt}; color: {c.text_muted}; border-radius: {Metrics.RADIUS}px;
         padding: 2px 7px; font-size: {Typography.CAPTION}px; font-weight: 600; }}
     QFrame[role="surface"] {{ background: {c.surface}; border: 1px solid {c.border}; border-radius: {Metrics.RADIUS_LARGE}px; }}

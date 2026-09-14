@@ -3,7 +3,7 @@ import threading
 from datetime import date, timedelta
 from pathlib import Path
 
-from PySide6.QtCore import QObject, Qt, QTimer, Signal
+from PySide6.QtCore import QObject, QRunnable, QThreadPool, Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QCloseEvent, QKeySequence
 from PySide6.QtWidgets import (
     QApplication, QComboBox, QFileDialog, QFrame, QHBoxLayout, QLabel, QMainWindow,
@@ -15,7 +15,7 @@ from ..core.indexer import MediaIndexer
 from ..core.media import FFMPEG_ENABLED, HEIC_ENABLED, open_in_default_app
 from ..core.settings import SettingsStore
 from .dialogs import PreferencesDialog
-from .pages import GalleryPage, VideosPage
+from .pages import GalleryPage, LibraryInsightsPage, VideosPage
 from .theme import ThemeManager
 
 LOGGER = logging.getLogger(__name__)
@@ -23,6 +23,31 @@ LOGGER = logging.getLogger(__name__)
 
 class IndexEvents(QObject):
     received = Signal(object)
+
+
+class AnalyticsEvents(QObject):
+    received = Signal(object)
+
+
+class AnalyticsLoadTask(QRunnable):
+    def __init__(self, repository: MediaRepository, folder: Path, request_id: int, emit):
+        super().__init__()
+        self.repository = repository
+        self.folder = folder
+        self.request_id = request_id
+        self.emit = emit
+
+    def run(self) -> None:
+        try:
+            result = self.repository.library_analytics(self.folder)
+            event = {"request_id": self.request_id, "folder": self.folder, "result": result}
+        except Exception as exc:
+            event = {"request_id": self.request_id, "folder": self.folder, "error": exc}
+        try:
+            self.emit(event)
+        except RuntimeError:
+            # The window may close while this short database task is finishing.
+            pass
 
 
 class MainWindow(QMainWindow):
@@ -40,6 +65,11 @@ class MainWindow(QMainWindow):
         self.pending_index_start = False
         self.index_events = IndexEvents()
         self.index_events.received.connect(self._handle_index_event)
+        self.analytics_events = AnalyticsEvents()
+        self.analytics_events.received.connect(self._handle_analytics_event)
+        self.analytics_pool = QThreadPool(self)
+        self.analytics_pool.setMaxThreadCount(1)
+        self.analytics_request_id = 0
 
         self.setWindowTitle("On This Day")
         self.setMinimumSize(900, 620)
@@ -75,6 +105,9 @@ class MainWindow(QMainWindow):
         self.videos_button = QPushButton("Video Library")
         self.videos_button.clicked.connect(self.show_videos)
         toolbar_layout.addWidget(self.videos_button)
+        self.insights_button = QPushButton("Library Insights")
+        self.insights_button.clicked.connect(self.show_insights)
+        toolbar_layout.addWidget(self.insights_button)
         toolbar_layout.addStretch()
         self.date_navigation = QWidget()
         date_layout = QHBoxLayout(self.date_navigation)
@@ -121,8 +154,15 @@ class MainWindow(QMainWindow):
         self.videos.back_requested.connect(lambda: self.stack.setCurrentWidget(self.gallery))
         self.videos.refresh_requested.connect(self._load_videos)
         self.videos.open_requested.connect(self.open_media)
+        self.insights = LibraryInsightsPage(self.theme.colors)
+        self.insights.back_requested.connect(self.show_gallery)
+        self.insights.choose_folder_requested.connect(self.choose_folder)
+        self.insights.rescan_requested.connect(self.start_indexing)
+        self.insights.retry_requested.connect(self._load_insights)
+        self.theme.changed.connect(lambda _preference: self.insights.set_theme_colors(self.theme.colors))
         self.stack.addWidget(self.gallery)
         self.stack.addWidget(self.videos)
+        self.stack.addWidget(self.insights)
         self.stack.currentChanged.connect(self._page_changed)
         root_layout.addWidget(self.stack, 1)
         self.status = QLabel("Ready")
@@ -160,6 +200,9 @@ class MainWindow(QMainWindow):
         videos = QAction("Video Library", self, shortcut=QKeySequence("Ctrl+Shift+V"))
         videos.triggered.connect(self.show_videos)
         view_menu.addAction(videos)
+        insights = QAction("Library Insights", self, shortcut=QKeySequence("Ctrl+Shift+I"))
+        insights.triggered.connect(self.show_insights)
+        view_menu.addAction(insights)
         search = QAction("Search Videos", self, shortcut=QKeySequence.StandardKey.Find)
         search.triggered.connect(self.focus_search)
         view_menu.addAction(search)
@@ -175,6 +218,8 @@ class MainWindow(QMainWindow):
             self.folder_status.setToolTip(str(self.root_folder))
             self.folder_button.setText("Change Folder")
         self.refresh_gallery()
+        if self.root_folder:
+            self._load_insights()
         missing = []
         if not HEIC_ENABLED:
             missing.append("HEIC image support")
@@ -204,6 +249,7 @@ class MainWindow(QMainWindow):
         self.folder_status.setToolTip(str(folder))
         self.folder_button.setText("Change Folder")
         self.refresh_gallery()
+        self._load_insights()
         self.start_indexing()
 
     def start_indexing(self) -> None:
@@ -248,6 +294,7 @@ class MainWindow(QMainWindow):
                 self.refresh_gallery()
                 if self.stack.currentWidget() is self.videos:
                     self._load_videos()
+                self._load_insights()
             elif event_type == "scan_cancelled":
                 self.status.setText("Indexing cancelled")
             else:
@@ -289,6 +336,35 @@ class MainWindow(QMainWindow):
         self._load_videos()
         self.stack.setCurrentWidget(self.videos)
 
+    def show_gallery(self) -> None:
+        self.stack.setCurrentWidget(self.gallery)
+
+    def show_insights(self) -> None:
+        self.stack.setCurrentWidget(self.insights)
+        self._load_insights()
+
+    def _load_insights(self) -> None:
+        self.analytics_request_id += 1
+        request_id = self.analytics_request_id
+        folder = self.root_folder
+        if folder is None:
+            self.insights.show_no_folder()
+            return
+        self.insights.show_loading()
+        self.analytics_pool.clear()
+        self.analytics_pool.start(
+            AnalyticsLoadTask(self.repository, folder, request_id, self.analytics_events.received.emit)
+        )
+
+    def _handle_analytics_event(self, event: dict) -> None:
+        if event.get("request_id") != self.analytics_request_id or event.get("folder") != self.root_folder:
+            return
+        if "error" in event:
+            LOGGER.error("Could not load Library Insights: %s", event["error"])
+            self.insights.show_error()
+            return
+        self.insights.set_result(event["result"])
+
     def _load_videos(self) -> None:
         if not self.root_folder:
             self.videos.set_records([])
@@ -326,5 +402,6 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event: QCloseEvent) -> None:
         self.stop_event.set()
+        self.analytics_pool.clear()
         self.gallery.pool.clear()
         event.accept()
