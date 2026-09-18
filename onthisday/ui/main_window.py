@@ -3,7 +3,7 @@ import threading
 from datetime import date, timedelta
 from pathlib import Path
 
-from PySide6.QtCore import QObject, QRunnable, QThreadPool, Qt, QTimer, Signal
+from PySide6.QtCore import QFile, QObject, QRunnable, QThreadPool, Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QCloseEvent, QKeySequence
 from PySide6.QtWidgets import (
     QApplication, QComboBox, QFileDialog, QFrame, QHBoxLayout, QLabel, QMainWindow,
@@ -12,7 +12,8 @@ from PySide6.QtWidgets import (
 
 from ..core.database import MediaRepository
 from ..core.indexer import MediaIndexer
-from ..core.media import FFMPEG_ENABLED, HEIC_ENABLED, open_in_default_app
+from ..core.media import FFMPEG_ENABLED, HEIC_ENABLED, open_in_default_app, thumbnail_cache_path
+from ..core.models import MediaRecord
 from ..core.settings import SettingsStore
 from .dialogs import PreferencesDialog
 from .pages import GalleryPage, LibraryInsightsPage, VideosPage
@@ -150,6 +151,7 @@ class MainWindow(QMainWindow):
         self.gallery = GalleryPage()
         self.gallery.choose_folder_requested.connect(self.choose_folder)
         self.gallery.open_requested.connect(self.open_media)
+        self.gallery.delete_requested.connect(self.delete_media)
         self.videos = VideosPage()
         self.videos.back_requested.connect(lambda: self.stack.setCurrentWidget(self.gallery))
         self.videos.refresh_requested.connect(self._load_videos)
@@ -385,6 +387,44 @@ class MainWindow(QMainWindow):
         success, detail = open_in_default_app(path)
         if not success:
             self._error("Unable to open file", "The file may have moved or you may not have permission to access it.\n\n" + (detail or ""))
+
+    def delete_media(self, record: MediaRecord) -> None:
+        folder = self.root_folder
+        if folder is None:
+            return
+        try:
+            record.path.resolve().relative_to(folder.resolve())
+        except (OSError, ValueError):
+            self._error("Unable to move file", "This file is outside the selected media folder.")
+            return
+
+        kind = "video" if record.is_video else "photo"
+        dialog = QMessageBox(self)
+        dialog.setIcon(QMessageBox.Icon.Warning)
+        dialog.setWindowTitle(f"Move {kind} to Trash?")
+        dialog.setText(f"Move “{record.path.name}” to Trash?")
+        dialog.setInformativeText("This removes the original file from your media library. You can recover it from Trash.")
+        move_button = dialog.addButton("Move to Trash", QMessageBox.ButtonRole.DestructiveRole)
+        dialog.addButton(QMessageBox.StandardButton.Cancel)
+        dialog.setDefaultButton(QMessageBox.StandardButton.Cancel)
+        dialog.exec()
+        if dialog.clickedButton() is not move_button:
+            return
+
+        cached_thumbnail = thumbnail_cache_path(record.path, record.file_size, record.modified_ns)
+        if not QFile.moveToTrash(str(record.path)):
+            self._error("Unable to move file", "The file could not be moved to Trash. Check that it still exists and that you have permission to change it.")
+            return
+        try:
+            self.repository.remove(folder, record.path)
+            cached_thumbnail.unlink(missing_ok=True)
+        except OSError:
+            LOGGER.exception("Media moved to Trash, but cached data could not be removed")
+        except Exception:
+            LOGGER.exception("Media moved to Trash, but its index record could not be removed")
+        self.status.setText(f"Moved {record.path.name} to Trash")
+        self.refresh_gallery()
+        self._load_insights()
 
     def show_preferences(self) -> None:
         dialog = PreferencesDialog(self.settings.theme, self)

@@ -44,6 +44,19 @@ def open_database() -> sqlite3.Connection:
 
 
 class MediaRepository:
+    def remove(self, folder: Path, path: Path) -> bool:
+        """Remove one media item from a folder's index."""
+        connection = open_database()
+        try:
+            cursor = connection.execute(
+                "DELETE FROM photos WHERE folder_root = ? AND file_path = ?",
+                (str(folder.resolve()), str(path.resolve())),
+            )
+            connection.commit()
+            return cursor.rowcount > 0
+        finally:
+            connection.close()
+
     def matches_for_date(self, folder: Path, selected_date: date, media_filter: str) -> list[MediaRecord]:
         sql = """
             SELECT file_path, capture_ts, media_type, file_size, modified_ns

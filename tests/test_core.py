@@ -69,6 +69,31 @@ class StorageTests(unittest.TestCase):
         self.assertEqual(repository.matches_for_date(media_root, date(2026, 9, 13), "Photos")[0].path, photo)
         self.assertEqual(repository.all_videos(media_root)[0].path, video)
 
+    def test_repository_removes_only_requested_folder_record(self):
+        first = self.root / "first"
+        second = self.root / "second"
+        first.mkdir()
+        second.mkdir()
+        shared_name = "photo.jpg"
+        first_photo = first / shared_name
+        second_photo = second / shared_name
+        first_photo.touch()
+        second_photo.touch()
+        connection = database.open_database()
+        rows = [
+            (str(first.resolve()), str(first_photo.resolve()), 1, 1, "2025-09-13T08:00:00", 2025, 9, 13, "image", 0),
+            (str(second.resolve()), str(second_photo.resolve()), 1, 1, "2025-09-13T08:00:00", 2025, 9, 13, "image", 0),
+        ]
+        connection.executemany("INSERT INTO photos VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", rows)
+        connection.commit()
+        connection.close()
+
+        repository = database.MediaRepository()
+        self.assertTrue(repository.remove(first, first_photo))
+        self.assertFalse(repository.remove(first, first_photo))
+        self.assertEqual(len(repository.matches_for_date(first, date(2026, 9, 13), "All")), 0)
+        self.assertEqual(len(repository.matches_for_date(second, date(2026, 9, 13), "All")), 1)
+
     def test_indexer_scans_and_emits_completion(self):
         media_root = self.root / "library"
         media_root.mkdir()

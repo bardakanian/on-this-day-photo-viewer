@@ -16,6 +16,7 @@ from ..widgets.media_card import MediaCard
 
 class YearSection(QWidget):
     open_requested = Signal(object)
+    delete_requested = Signal(object)
 
     def __init__(self, year: int, records: list[MediaRecord], root_folder: Path, pool: QThreadPool, parent=None):
         super().__init__(parent)
@@ -55,6 +56,7 @@ class YearSection(QWidget):
         for record in self.records[self.rendered:end]:
             card = MediaCard(record, self.root_folder, self.pool)
             card.open_requested.connect(self.open_requested)
+            card.delete_requested.connect(self.delete_requested)
             self.flow.addWidget(card)
         self.rendered = end
         remaining = len(self.records) - end
@@ -66,6 +68,7 @@ class YearSection(QWidget):
 class GalleryPage(QWidget):
     choose_folder_requested = Signal()
     open_requested = Signal(object)
+    delete_requested = Signal(object)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -121,4 +124,5 @@ class GalleryPage(QWidget):
         for year in sorted(grouped, reverse=True):
             section = YearSection(year, grouped[year], folder, self.pool)
             section.open_requested.connect(self.open_requested)
+            section.delete_requested.connect(self.delete_requested)
             self.content_layout.addWidget(section)

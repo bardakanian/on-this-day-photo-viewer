@@ -2,7 +2,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QObject, QRunnable, Qt, QThreadPool, Signal
 from PySide6.QtGui import QCursor, QMouseEvent, QPixmap
-from PySide6.QtWidgets import QFrame, QLabel, QSizePolicy, QVBoxLayout
+from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QSizePolicy, QVBoxLayout
 
 from ...core.media import get_cached_thumbnail, thumbnail_cache_path
 from ...core.models import MediaRecord
@@ -36,6 +36,7 @@ class ClickablePreview(QLabel):
 
 class MediaCard(QFrame):
     open_requested = Signal(object)
+    delete_requested = Signal(object)
 
     def __init__(self, record: MediaRecord, root_folder: Path, pool: QThreadPool, parent=None):
         super().__init__(parent)
@@ -69,10 +70,19 @@ class MediaCard(QFrame):
             folder_text = "Library" if str(relative) == "." else str(relative)
         except ValueError:
             folder_text = str(record.path.parent)
+        details = QHBoxLayout()
+        details.setContentsMargins(0, 0, 0, 0)
+        details.setSpacing(5)
         folder = QLabel(folder_text)
         folder.setProperty("muted", True)
         folder.setToolTip(str(record.path.parent))
-        layout.addWidget(folder)
+        details.addWidget(folder, 1)
+        delete = QPushButton("Move to Trash")
+        delete.setProperty("variant", "danger")
+        delete.setToolTip(f"Move {record.path.name} to Trash")
+        delete.clicked.connect(lambda: self.delete_requested.emit(record))
+        details.addWidget(delete)
+        layout.addLayout(details)
 
         cached = thumbnail_cache_path(record.path, record.file_size, record.modified_ns)
         if cached.exists():
