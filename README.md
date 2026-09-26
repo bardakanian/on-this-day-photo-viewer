@@ -172,3 +172,11 @@ The application writes unexpected errors to `~/.on_this_day_photo_viewer/on_this
 ## Project status
 
 Active development. Test with a backed-up media library and review detected capture dates before relying on the index for organization decisions.
+
+## Development approach
+
+Developed with AI-assisted tools under human direction, review, testing, and refinement.
+
+## License
+
+This project is available under the [MIT License](LICENSE).
