@@ -282,4 +282,4 @@ Developed with AI-assisted tools under human direction, review, testing, and ref
 
 ## License
 
-This project is available under the MIT License.
+This project is available under the [MIT License](https://github.com/bardakanian/on-this-day-photo-viewer?tab=MIT-1-ov-file).
