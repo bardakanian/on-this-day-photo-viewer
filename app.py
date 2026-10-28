@@ -3,7 +3,7 @@
 import logging
 import sys
 
-from PySide6.QtCore import QCoreApplication, Qt
+from PySide6.QtCore import QCoreApplication, QLoggingCategory, Qt
 from PySide6.QtWidgets import QApplication, QMessageBox
 
 from onthisday.core.constants import APP_DIR
@@ -22,7 +22,18 @@ def configure_logging() -> None:
         logging.basicConfig(level=logging.INFO)
 
 
+def quiet_qt_logging() -> None:
+    """Hide Qt Multimedia's informational chatter (the FFmpeg banner and per-file stream dump).
+    Warnings and errors still come through; QT_LOGGING_RULES can turn the messages back on."""
+    QLoggingCategory.setFilterRules(
+        "qt.multimedia.ffmpeg.info=false\n"
+        "qt.multimedia.ffmpeg.*.info=false\n"
+        "qt.rhi.*.info=false"
+    )
+
+
 def main() -> int:
+    quiet_qt_logging()
     QCoreApplication.setOrganizationName("On This Day")
     QCoreApplication.setApplicationName("On This Day")
     QApplication.setHighDpiScaleFactorRoundingPolicy(Qt.HighDpiScaleFactorRoundingPolicy.PassThrough)

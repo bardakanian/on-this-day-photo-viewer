@@ -63,7 +63,7 @@ class VideoFilterModel(QSortFilterProxyModel):
 
 class VideosPage(QWidget):
     back_requested = Signal()
-    open_requested = Signal(object)
+    open_requested = Signal(object, int)  # rows as currently sorted and filtered, index to open
     refresh_requested = Signal()
 
     def __init__(self, parent=None):
@@ -133,8 +133,9 @@ class VideosPage(QWidget):
         self.count.setText(f"{shown:,} of {total:,} videos" if text else f"{total:,} indexed videos")
 
     def _open_index(self, index: QModelIndex) -> None:
-        source = self.proxy.mapToSource(index)
-        self.open_requested.emit(self.model.rows[source.row()].path)
+        rows = [self.model.rows[self.proxy.mapToSource(self.proxy.index(row, 0)).row()]
+                for row in range(self.proxy.rowCount())]
+        self.open_requested.emit(rows, index.row())
 
     def open_selected(self) -> None:
         indexes = self.table.selectionModel().selectedRows()

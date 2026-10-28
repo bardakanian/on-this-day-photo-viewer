@@ -113,6 +113,18 @@ On first launch, choose a folder containing photos and videos. The selected fold
 appearance preference, SQLite index, thumbnail cache, and application log are kept
 in the local app-data directory described below.
 
+### 5. Optional: add it to Applications (macOS)
+
+```bash
+python tools/make_launcher.py
+```
+
+This builds `On This Day.app` and installs it in `/Applications`, so you can start it
+from Launchpad, Spotlight or the Dock. Use `--user` to install in `~/Applications`
+instead. The launcher runs `app.py` with the project's `.venv`, so it always starts
+your latest code. Re-run the script if you move the project folder. App output goes
+to `~/.on_this_day_photo_viewer/launcher.log`.
+
 ## Using the app
 
 ### Browse the daily gallery
@@ -161,10 +173,19 @@ backups meet your recovery needs before using it.
 
 ## Capture-date detection
 
-For images, the app prefers embedded EXIF timestamps and then checks macOS metadata
-when available. For videos, it checks embedded metadata through FFmpeg, followed by
-macOS metadata and filesystem timestamps. A file's modification time is used as a
-final fallback when no stronger image date is available.
+Each file's capture date comes from the first of these that exists:
+
+1. **Embedded metadata:** EXIF for images, and the creation time inside the video (read with FFmpeg).
+2. **A date macOS Spotlight found in the file's content.** It's ignored when it equals the
+   file's own creation time, because then it's just when the file was copied to this disk.
+3. **The earlier of the file's creation and modification times.** Copying a file to a
+   backup drive resets its creation time but keeps its modification time, so the earlier
+   one is closer to when the photo or video was made.
+
+"Zero" and unset-clock dates (January 1, 1970, which shows as December 31, 1969 in US
+time zones; January 1, 1980; January 1, 1904; and dates in the future) are never treated
+as capture dates; the next source is used instead. After an update to these rules, the
+next scan re-reads every file once.
 
 Because metadata can be missing or incorrect, review detected dates before relying
 on the index for organizational decisions.

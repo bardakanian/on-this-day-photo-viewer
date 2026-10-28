@@ -2,8 +2,9 @@ import hashlib
 import os
 import subprocess
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
+from typing import Callable
 
 from PIL import Image, ImageOps
 
@@ -31,23 +32,71 @@ def media_type_for_path(path: Path) -> str:
     return "video" if path.suffix.lower() in VIDEO_EXTENSIONS else "image"
 
 
+# Clocks that were never set, and "zero" timestamps, show up as these dates. They are never real
+# capture times; treating them as missing lets the next source of a date be used instead.
+_PLACEHOLDER_DAYS = {(1904, 1, 1), (1970, 1, 1), (1980, 1, 1)}
+
+
+def is_placeholder_date(value: datetime) -> bool:
+    """True for epoch and unset-clock dates (checked a day either side to allow for time zones)."""
+    if value.year < 1900 or value.year > datetime.now().year + 1:
+        return True
+    for offset in (-1, 0, 1):
+        day = value + timedelta(days=offset)
+        if (day.year, day.month, day.day) in _PLACEHOLDER_DAYS:
+            return True
+    return False
+
+
+def _usable(value: datetime | None) -> datetime | None:
+    return value if value is not None and not is_placeholder_date(value) else None
+
+
+_SPOTLIGHT_FIELDS = ("kMDItemContentCreationDate", "kMDItemFSCreationDate")
+# Spotlight dates within this many seconds of the file's own creation time carry no extra information.
+_SAME_MOMENT_SECONDS = 2
+
+
+def _parse_spotlight_value(value: str) -> datetime | None:
+    value = value.strip()
+    if not value or value == "(null)":
+        return None
+    try:
+        return datetime.strptime(value, "%Y-%m-%d %H:%M:%S %z").astimezone().replace(tzinfo=None)
+    except ValueError:
+        return None
+
+
+def choose_spotlight_date(content_created: datetime | None, file_created: datetime | None) -> datetime | None:
+    """Spotlight's content date, but only when it says more than the file system does.
+
+    For files without embedded dates, Spotlight reports the file's own creation time as the
+    content date. That is when the file was copied to this disk (a backup, an export, a
+    download), not when the photo was taken, so it must not be used as a capture date.
+    """
+    if content_created is None:
+        return None
+    if file_created is not None and abs((content_created - file_created).total_seconds()) <= _SAME_MOMENT_SECONDS:
+        return None
+    return content_created
+
+
 def parse_macos_metadata_date(path: Path) -> datetime | None:
+    """A capture date Spotlight found inside the file, or None."""
     if sys.platform != "darwin":
         return None
-    for field in ("kMDItemContentCreationDate", "kMDItemFSCreationDate"):
-        try:
-            result = subprocess.run(
-                ["mdls", "-raw", "-name", field, str(path)],
-                capture_output=True, text=True, timeout=5, check=False,
-            )
-            value = result.stdout.strip()
-            if not value or value == "(null)":
-                continue
-            parsed = datetime.strptime(value, "%Y-%m-%d %H:%M:%S %z")
-            return parsed.astimezone().replace(tzinfo=None)
-        except (OSError, subprocess.SubprocessError, ValueError):
-            continue
-    return None
+    try:
+        result = subprocess.run(
+            ["mdls", "-raw", *(arg for field in _SPOTLIGHT_FIELDS for arg in ("-name", field)), str(path)],
+            capture_output=True, text=True, timeout=5, check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    # With -raw, values are separated by NUL characters, in the order requested.
+    values = result.stdout.split("\0")
+    if len(values) < 2:
+        return None
+    return choose_spotlight_date(_parse_spotlight_value(values[0]), _parse_spotlight_value(values[1]))
 
 
 def get_image_exif_date(path: Path) -> datetime | None:
@@ -104,25 +153,28 @@ def get_video_metadata_date(path: Path) -> datetime | None:
     return None
 
 
-def get_filesystem_creation_date(path: Path) -> datetime | None:
+def get_filesystem_date(path: Path) -> datetime | None:
+    """The earlier of the file's creation and modification times.
+
+    Copying a file (to a backup drive, a new Mac, a cloud export) resets its creation time
+    to the copy time but keeps its modification time, so the earlier one is closer to when
+    the photo or video was actually made.
+    """
     try:
         stat = path.stat()
-        return datetime.fromtimestamp(getattr(stat, "st_birthtime", stat.st_ctime))
     except OSError:
         return None
+    candidates = [datetime.fromtimestamp(stamp) for stamp in
+                  (stat.st_mtime, getattr(stat, "st_birthtime", stat.st_mtime)) if stamp > 0]
+    # Ignore zero and unset-clock timestamps some filesystems and memory cards report.
+    valid = [value for value in candidates if not is_placeholder_date(value)]
+    return min(valid or candidates, default=None)
 
 
 def get_capture_date(path: Path, media_type: str) -> datetime | None:
-    if media_type == "image":
-        detected = get_image_exif_date(path) or parse_macos_metadata_date(path)
-    else:
-        detected = get_video_metadata_date(path) or parse_macos_metadata_date(path) or get_filesystem_creation_date(path)
-    if detected is not None:
-        return detected
-    try:
-        return datetime.fromtimestamp(path.stat().st_mtime)
-    except OSError:
-        return None
+    # Embedded date first, then a date Spotlight found in the content, then the file's own times.
+    embedded = get_image_exif_date(path) if media_type == "image" else get_video_metadata_date(path)
+    return _usable(embedded) or _usable(parse_macos_metadata_date(path)) or get_filesystem_date(path)
 
 
 def thumbnail_cache_path(
@@ -160,7 +212,7 @@ def _image_thumbnail(source: Path, target: Path) -> None:
         image = ImageOps.exif_transpose(image)
         image = image.convert("RGB")
         image.thumbnail(THUMBNAIL_SIZE, Image.Resampling.LANCZOS)
-        canvas = Image.new("RGB", THUMBNAIL_SIZE, (18, 20, 24))
+        canvas = Image.new("RGB", THUMBNAIL_SIZE, THUMBNAIL_PADDING)
         canvas.paste(image, ((THUMBNAIL_SIZE[0] - image.width) // 2, (THUMBNAIL_SIZE[1] - image.height) // 2))
         canvas.save(target, "JPEG", quality=87, optimize=True)
 
@@ -225,3 +277,77 @@ def open_in_default_app(path: Path) -> tuple[bool, str | None]:
         return True, None
     except OSError as exc:
         return False, str(exc)
+
+
+def load_display_image(path: Path, max_edge: int) -> Image.Image:
+    """Decode a photo for the viewer: EXIF-rotated, at most `max_edge` on its longest side."""
+    with Image.open(path) as image:
+        if getattr(image, "is_animated", False):
+            try:
+                image.seek(0)
+            except EOFError:
+                pass
+        image.draft("RGB", (max_edge, max_edge))
+        image = ImageOps.exif_transpose(image)
+        image = image.convert("RGBA") if image.mode in {"RGBA", "LA", "P"} else image.convert("RGB")
+        if max(image.size) > max_edge:
+            image.thumbnail((max_edge, max_edge), Image.Resampling.LANCZOS)
+        return image
+
+
+THUMBNAIL_PADDING = (18, 20, 24)  # canvas colour of photo thumbnails (video ones are padded black)
+
+
+def letterbox_content_rect(
+    width: int, height: int, pixel: Callable[[int, int], tuple[int, int, int]], tolerance: int = 12,
+) -> tuple[int, int, int, int] | None:
+    """Find the picture inside a padded thumbnail as (x, y, width, height).
+
+    Thumbnails are letterboxed with THUMBNAIL_PADDING, so the picture touches two opposite
+    edges and is centred. Only the middle row and column are sampled. Returns None when the
+    result isn't believable (e.g. a dark photo whose own edges look like padding).
+    """
+    def is_padding(x: int, y: int) -> bool:
+        return all(abs(a - b) <= tolerance for a, b in zip(pixel(x, y), THUMBNAIL_PADDING))
+
+    def span(length: int, sample: Callable[[int], bool]) -> tuple[int, int]:
+        start = 0
+        while start < length and sample(start):
+            start += 1
+        end = length
+        while end > start and sample(end - 1):
+            end -= 1
+        return start, end
+
+    left, right = span(width, lambda x: is_padding(x, height // 2))
+    top, bottom = span(height, lambda y: is_padding(width // 2, y))
+    content_w, content_h = right - left, bottom - top
+    if content_w <= 0 or content_h <= 0:
+        return None
+    # Padding is on one axis only and equal on both sides (allow a couple of pixels for JPEG noise).
+    padded_x, padded_y = width - content_w > 2, height - content_h > 2
+    if padded_x and padded_y:
+        return None
+    if abs(left - (width - right)) > 3 or abs(top - (height - bottom)) > 3:
+        return None
+    if content_w < width * 0.25 or content_h < height * 0.25:
+        return None
+    return left, top, content_w, content_h
+
+
+def format_duration(milliseconds: int) -> str:
+    total = max(0, int(round(milliseconds / 1000)))
+    hours, remainder = divmod(total, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    return f"{hours}:{minutes:02d}:{seconds:02d}" if hours else f"{minutes}:{seconds:02d}"
+
+
+def display_size(path: Path) -> tuple[int, int] | None:
+    """Pixel size of a photo as displayed (EXIF rotation applied), read from the header only."""
+    try:
+        with Image.open(path) as image:
+            width, height = image.size
+            orientation = image.getexif().get(0x0112, 1)
+    except (OSError, ValueError, TypeError):
+        return None
+    return (height, width) if orientation in (5, 6, 7, 8) else (width, height)

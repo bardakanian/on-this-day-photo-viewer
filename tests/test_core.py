@@ -1,14 +1,17 @@
 import json
+import os
+import subprocess
+import sys
 import tempfile
 import threading
 import unittest
-from datetime import date
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from unittest.mock import patch
 
 from PIL import Image
 
-from onthisday.core import database, media, settings
+from onthisday.core import database, indexer, media, settings
 from onthisday.core.indexer import MediaIndexer
 from onthisday.core.settings import SettingsStore
 
@@ -148,6 +151,91 @@ class StorageTests(unittest.TestCase):
         with Image.open(thumbnail) as result:
             self.assertEqual(result.size, media.THUMBNAIL_SIZE)
 
+    def test_indexer_reads_dates_in_parallel(self):
+        media_root = self.root / "parallel"
+        media_root.mkdir()
+        for day in range(1, 41):
+            exif = Image.Exif()
+            exif[306] = f"2019:03:{day % 28 + 1:02d} 10:00:00"
+            Image.new("RGB", (8, 8)).save(media_root / f"photo-{day}.jpg", exif=exif)
+        events = []
+        MediaIndexer(media_root, threading.Event(), 1, events.append).run()
+        self.assertEqual(events[-1]["type"], "scan_complete")
+        self.assertEqual((events[-1]["total_indexed"], events[-1]["updated"], events[-1]["errors"]), (40, 40, 0))
+        connection = database.open_database()
+        dates = {Path(path).name: ts for path, ts in connection.execute("SELECT file_path, capture_ts FROM photos")}
+        connection.close()
+        self.assertEqual(dates["photo-5.jpg"], "2019-03-06T10:00:00")
+        # A second scan finds everything unchanged and reads no metadata.
+        events = []
+        with patch.object(indexer, "get_capture_date") as read_date:
+            MediaIndexer(media_root, threading.Event(), 2, events.append).run()
+            read_date.assert_not_called()
+        self.assertEqual(events[-1]["unchanged"], 40)
+
+    def test_indexer_counts_metadata_errors_per_file(self):
+        media_root = self.root / "errors"
+        media_root.mkdir()
+        for name in ("good.jpg", "bad.jpg"):
+            Image.new("RGB", (8, 8)).save(media_root / name)
+        real = indexer.get_capture_date
+
+        def flaky(path, media_type):
+            if path.name == "bad.jpg":
+                raise RuntimeError("unreadable")
+            return real(path, media_type)
+
+        events = []
+        with patch.object(indexer, "get_capture_date", side_effect=flaky):
+            MediaIndexer(media_root, threading.Event(), 1, events.append).run()
+        self.assertEqual((events[-1]["errors"], events[-1]["total_indexed"]), (1, 1))
+
+    def test_indexer_cancel_stops_scan(self):
+        media_root = self.root / "cancel"
+        media_root.mkdir()
+        for index in range(20):
+            Image.new("RGB", (8, 8)).save(media_root / f"{index}.jpg")
+        stop = threading.Event()
+
+        def stop_on_first(path, media_type):
+            stop.set()
+            return None
+
+        events = []
+        with patch.object(indexer, "get_capture_date", side_effect=stop_on_first):
+            MediaIndexer(media_root, stop, 1, events.append).run()
+        self.assertEqual(events[-1]["type"], "scan_cancelled")
+
+    def test_unchanged_files_from_an_older_version_are_reread_once(self):
+        library = self.root / "library"
+        library.mkdir()
+        photo = library / "screenshot.png"
+        Image.new("RGB", (8, 8)).save(photo)
+        made = datetime(2026, 1, 3, 7, 52, 14)
+        os.utime(photo, (made.timestamp(), made.timestamp()))
+        stat = photo.stat()
+        # A row written by the old version: dated by the copy time, version 0.
+        connection = database.open_database()
+        connection.execute("INSERT INTO photos VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", (
+            str(library.resolve()), str(photo.resolve()), stat.st_size, stat.st_mtime_ns,
+            "2026-06-26T18:09:53", 2026, 6, 26, "image", 0,
+        ))
+        connection.commit()
+        connection.close()
+
+        with patch.object(media, "parse_macos_metadata_date", return_value=None):
+            events = []
+            MediaIndexer(library, threading.Event(), 1, events.append).run()
+            self.assertEqual((events[-1]["updated"], events[-1]["unchanged"]), (1, 0))
+            connection = database.open_database()
+            stored = connection.execute("SELECT capture_ts FROM photos").fetchone()[0]
+            connection.close()
+            self.assertEqual(stored, "2026-01-03T07:52:14")
+            # The next scan leaves it alone.
+            events = []
+            MediaIndexer(library, threading.Event(), 2, events.append).run()
+            self.assertEqual((events[-1]["updated"], events[-1]["unchanged"]), (0, 1))
+
     def insert_analytics_rows(self, folder: Path, rows: list[tuple[str, int | None, int | None, int | None]]) -> None:
         """Insert (media_type, year, month, day) rows for repository tests."""
         connection = database.open_database()
@@ -251,6 +339,84 @@ class StorageTests(unittest.TestCase):
         self.assertEqual(result.largest_year, 2020)
         self.assertEqual(result.most_active_month, 3)
 
+
+
+class CopiedFileDateTests(unittest.TestCase):
+    """Files without embedded dates that were copied (backups, exports) after they were made.
+
+    Regression: they were dated by the copy time, so a backup made in June showed January
+    photos on a June day.
+    """
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.root = Path(self.temp.name).resolve()
+
+    def tearDown(self):
+        self.temp.cleanup()
+
+    def copied_file(self, name, made, data=None):
+        path = self.root / name
+        if data is None:
+            Image.new("RGB", (8, 8), "teal").save(path)  # no EXIF
+        else:
+            path.write_bytes(data)
+        stamp = made.timestamp()
+        os.utime(path, (stamp, stamp))  # modification time survives a copy; creation time is "now"
+        return path
+
+    def test_image_without_metadata_uses_earliest_file_time(self):
+        made = datetime(2026, 1, 3, 7, 52, 14)
+        with patch.object(media, "parse_macos_metadata_date", return_value=None):
+            self.assertEqual(media.get_capture_date(self.copied_file("screenshot.png", made), "image"), made)
+
+    def test_video_without_metadata_uses_earliest_file_time(self):
+        made = datetime(2026, 1, 2, 22, 9, 34)
+        path = self.copied_file("clip.mp4", made, data=b"not really a video")
+        with patch.object(media, "parse_macos_metadata_date", return_value=None):
+            self.assertEqual(media.get_capture_date(path, "video"), made)
+
+    def test_spotlight_copy_time_is_ignored(self):
+        copy_time = datetime(2026, 6, 26, 18, 9, 53)
+        self.assertIsNone(media.choose_spotlight_date(copy_time, copy_time))
+        self.assertIsNone(media.choose_spotlight_date(copy_time, copy_time + timedelta(seconds=1)))
+        self.assertIsNone(media.choose_spotlight_date(None, copy_time))
+        taken = datetime(2026, 1, 3, 7, 52)
+        self.assertEqual(media.choose_spotlight_date(taken, copy_time), taken)
+
+    @unittest.skipUnless(sys.platform == "darwin", "Spotlight is macOS-only")
+    def test_spotlight_lookup_parses_both_fields(self):
+        def fake_mdls(stdout):
+            return patch.object(media.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, stdout, ""))
+
+        with fake_mdls("2026-06-27 01:09:53 +0000\x002026-06-27 01:09:53 +0000"):
+            self.assertIsNone(media.parse_macos_metadata_date(self.root / "x.jpg"))
+        expected = datetime.fromisoformat("2026-01-03 15:52:14+00:00").astimezone().replace(tzinfo=None)
+        with fake_mdls("2026-01-03 15:52:14 +0000\x002026-06-27 01:09:53 +0000"):
+            self.assertEqual(media.parse_macos_metadata_date(self.root / "x.jpg"), expected)
+
+
+class PlaceholderDateTests(unittest.TestCase):
+    """Epoch and unset-clock dates (1969/1970, 1980, 1904, far future) are not capture dates."""
+
+    def test_placeholder_dates(self):
+        for value in (datetime(1969, 12, 31, 16, 0), datetime(1970, 1, 1), datetime(1980, 1, 1, 0, 0, 45),
+                      datetime(1904, 1, 1), datetime(1899, 5, 1), datetime(datetime.now().year + 2, 1, 1)):
+            self.assertTrue(media.is_placeholder_date(value), value)
+        for value in (datetime(2026, 1, 3, 7, 52), datetime(1999, 11, 16, 16, 40), datetime(1980, 1, 3),
+                      datetime(1971, 6, 1)):
+            self.assertFalse(media.is_placeholder_date(value), value)
+
+    def test_unset_camera_clock_falls_back_to_file_time(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "IMG_7469.JPG"
+            exif = Image.Exif()
+            exif[306] = "1980:01:01 00:00:06"  # what a camera with an unset clock writes
+            Image.new("RGB", (8, 8)).save(path, exif=exif)
+            made = datetime(2017, 8, 16, 17, 26, 0)
+            os.utime(path, (made.timestamp(), made.timestamp()))
+            with patch.object(media, "parse_macos_metadata_date", return_value=None):
+                self.assertEqual(media.get_capture_date(path, "image"), made)
 
 if __name__ == "__main__":
     unittest.main()

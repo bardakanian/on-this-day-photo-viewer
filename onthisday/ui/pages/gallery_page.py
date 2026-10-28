@@ -18,9 +18,11 @@ class YearSection(QWidget):
     open_requested = Signal(object)
     delete_requested = Signal(object)
 
-    def __init__(self, year: int, records: list[MediaRecord], root_folder: Path, pool: QThreadPool, parent=None):
+    def __init__(self, year: int, records: list[MediaRecord], root_folder: Path, pool: QThreadPool,
+                 read_pool: QThreadPool, parent=None):
         super().__init__(parent)
         self.year, self.records, self.root_folder, self.pool = year, records, root_folder, pool
+        self.read_pool = read_pool
         self.rendered = 0
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 8)
@@ -54,7 +56,7 @@ class YearSection(QWidget):
     def render_more(self, amount: int) -> None:
         end = min(self.rendered + amount, len(self.records))
         for record in self.records[self.rendered:end]:
-            card = MediaCard(record, self.root_folder, self.pool)
+            card = MediaCard(record, self.root_folder, self.pool, self.read_pool)
             card.open_requested.connect(self.open_requested)
             card.delete_requested.connect(self.delete_requested)
             self.flow.addWidget(card)
@@ -74,6 +76,9 @@ class GalleryPage(QWidget):
         super().__init__(parent)
         self.pool = QThreadPool(self)
         self.pool.setMaxThreadCount(4)
+        # Separate pool for reading cached thumbnails so they never queue behind slow generation.
+        self.read_pool = QThreadPool(self)
+        self.read_pool.setMaxThreadCount(4)
         outer = QVBoxLayout(self)
         outer.setContentsMargins(28, 24, 28, 24)
         outer.setSpacing(20)
@@ -92,10 +97,32 @@ class GalleryPage(QWidget):
         self.content_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
         self.scroll.setWidget(self.content)
         outer.addWidget(self.scroll, 1)
+        # Every record for the shown day, in display order; the viewer steps through this list.
+        self.records: list[MediaRecord] = []
+        self._shown_key: tuple | None = None
+        self._pending_scroll: int | None = None
+        self.scroll.verticalScrollBar().rangeChanged.connect(self._apply_pending_scroll)
+
+    def cancel_pending(self) -> None:
+        """Drop queued thumbnail jobs for cards about to be destroyed; running ones just finish."""
+        self.pool.clear()
+        self.read_pool.clear()
+
+    def _apply_pending_scroll(self, _minimum: int, maximum: int) -> None:
+        if self._pending_scroll is not None and maximum >= self._pending_scroll:
+            self.scroll.verticalScrollBar().setValue(self._pending_scroll)
+            self._pending_scroll = None
 
     def show_records(self, records: list[MediaRecord], selected_date: date, media_filter: str, folder: Path | None) -> None:
-        # Drop queued thumbnail jobs for cards about to be destroyed; running ones just finish.
-        self.pool.clear()
+        self.cancel_pending()
+        # Reloading the same day (after a rescan or a deletion) keeps the scroll position.
+        key = (folder, selected_date, media_filter)
+        same_view = key == self._shown_key
+        self._shown_key = key
+        self._pending_scroll = self.scroll.verticalScrollBar().value() if same_view else None
+        if not same_view:
+            self.scroll.verticalScrollBar().setValue(0)
+        self.records = []
         while self.content_layout.count():
             item = self.content_layout.takeAt(0)
             widget = item.widget()
@@ -124,7 +151,8 @@ class GalleryPage(QWidget):
         for record in records:
             grouped[record.captured_at.year].append(record)
         for year in sorted(grouped, reverse=True):
-            section = YearSection(year, grouped[year], folder, self.pool)
+            self.records.extend(grouped[year])
+            section = YearSection(year, grouped[year], folder, self.pool, self.read_pool)
             section.open_requested.connect(self.open_requested)
             section.delete_requested.connect(self.delete_requested)
             self.content_layout.addWidget(section)
