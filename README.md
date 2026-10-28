@@ -15,10 +15,13 @@ generation, search, and library analytics all stay on your computer.
 - Browses the previous day, next day, or today's date from the main toolbar.
 - Filters the gallery to all media, photos only, or videos only.
 - Generates Retina-ready thumbnails away from the main interface and reuses cached results.
+- Keeps the interface responsive: date lookups, thumbnails, and photo decoding all happen
+  in the background, and scans read capture dates in parallel.
 - Loads large year groups in batches to keep the gallery responsive.
 - Includes a searchable, sortable library of every indexed video.
 - Calculates folder-specific Library Insights from the existing SQLite index.
-- Opens media in the operating system's default application.
+- Opens photos and videos in a full-window viewer with zoom, pan, and in-app video
+  playback. Any item can still be opened in its default application.
 - Supports system, light, and dark appearance modes.
 - Moves an item to the operating system's Trash only after explicit confirmation.
 - Preserves the existing app settings, media index, and compatible thumbnail cache.
@@ -65,7 +68,7 @@ because unchanged files do not need to be analyzed again.
 ## Requirements
 
 - Python 3.10 or newer
-- macOS for the primary supported desktop experience
+- macOS 11 or later, or Windows 10 or 11 (Windows is supported but has had less testing)
 - Read access to the selected media folder
 - Permission to modify the selected folder only if using **Move to Trash**
 
@@ -91,9 +94,18 @@ cd on-this-day-photo-viewer
 
 ### 2. Create and activate a virtual environment
 
+macOS:
+
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
+```
+
+Windows (PowerShell):
+
+```powershell
+py -m venv .venv
+.venv\Scripts\Activate.ps1
 ```
 
 ### 3. Install dependencies
@@ -113,17 +125,21 @@ On first launch, choose a folder containing photos and videos. The selected fold
 appearance preference, SQLite index, thumbnail cache, and application log are kept
 in the local app-data directory described below.
 
-### 5. Optional: add it to Applications (macOS)
+### 5. Optional: add it to Applications (macOS) or the Start menu (Windows)
 
 ```bash
 python tools/make_launcher.py
 ```
 
-This builds `On This Day.app` and installs it in `/Applications`, so you can start it
-from Launchpad, Spotlight or the Dock. Use `--user` to install in `~/Applications`
-instead. The launcher runs `app.py` with the project's `.venv`, so it always starts
-your latest code. Re-run the script if you move the project folder. App output goes
-to `~/.on_this_day_photo_viewer/launcher.log`.
+- **macOS:** builds `On This Day.app` and installs it in `/Applications`, so you can
+  start it from Launchpad, Spotlight or the Dock. Use `--user` to install in
+  `~/Applications` instead. App output goes to `~/.on_this_day_photo_viewer/launcher.log`.
+- **Windows:** adds an **On This Day** shortcut to the Start menu. Add `--desktop` for a
+  Desktop shortcut too. The shortcut starts the app with `pythonw`, so no console
+  window opens.
+
+Either way, the launcher runs `app.py` with the project's `.venv`, so it always starts
+your latest code. Re-run the script if you move the project folder.
 
 ## Using the app
 
@@ -134,15 +150,49 @@ to `~/.on_this_day_photo_viewer/launcher.log`.
 - Use the arrow controls to browse adjacent dates or **Today** to return to the
   current date.
 - Use the media filter to show all items, photos only, or videos only.
-- Select a thumbnail to open the original in its default application.
+- Select a thumbnail to open it in the viewer (see below).
 - Collapse or expand a year section to focus the timeline.
 
 ### Search the Video Library
 
 Open **Video Library** to browse every indexed video in the selected folder. The
-table can be searched, sorted by its visible columns, and opened from the selected
-row. Search matches the filename, media type, capture timestamp, and containing
-folder shown in the table.
+table can be searched and sorted by its visible columns. Search matches the filename,
+media type, capture timestamp, and containing folder shown in the table. Double-click
+a row, or right-click it and choose **Open Video**, to play it in the viewer.
+
+### View photos and videos
+
+Opening an item shows it full-window, with the main toolbar hidden. The top bar shows
+the filename and capture date, your position in the list (for example **3 of 12**),
+and buttons for **Open in Default App** and **Move to Trash**.
+
+- **Moving between items:** use **←** and **→** (or the arrow buttons), and **Home**
+  or **End** for the first or last item. From the gallery, this steps through every
+  item for the selected day, across all years, including items not yet shown with
+  **Load more**. From the Video Library, it follows the table's current sort order and
+  search results.
+- **Going back:** press **Esc** or select **‹ Back**. You return to the page you came
+  from, at the same scroll position.
+
+**Photos** open with their EXIF rotation applied, fitted to the window. The gallery
+thumbnail appears at once, and a screen-sized version replaces it a moment later.
+
+- **Zoom:** hold **⌘** and scroll, pinch on a trackpad, or press **⌘=** and **⌘−**.
+  Zoom follows the pointer.
+- **Fit or actual size:** double-click the photo, select **100%** / **Fit**, or press **⌘0**.
+- **Pan:** drag the photo, or scroll while zoomed in.
+- Zooming past screen resolution loads the full-resolution photo without moving the view.
+- The previous and next photos are prepared in the background, so stepping through a
+  day is quick.
+
+**Videos** start playing when opened.
+
+- **Play or pause:** select ▶ or press **Space**.
+- **Seek:** drag the progress bar, click anywhere on it, or press **⇧←** / **⇧→** to
+  move 5 seconds.
+- **Sound:** use the volume slider, or press **M** to mute.
+- If a video can't be played in the app, the viewer says so and offers **Open in
+  Default App**.
 
 ### Explore Library Insights
 
@@ -163,9 +213,10 @@ earliest calendar day, year, or month is selected consistently.
 
 ### Move media to Trash
 
-Each gallery card includes **Move to Trash**. The app shows the exact filename and
-requires confirmation before asking the operating system to move the original
-file to Trash. After a successful move, the matching SQLite record and cached
+Each gallery card includes **Move to Trash**, and so does the viewer (**⌘⌫**). The
+app shows the exact filename and requires confirmation before asking the operating
+system to move the original file to Trash. In the viewer, playback stops first so the
+file can be moved, and the next item is shown afterwards. After a successful move, the matching SQLite record and cached
 thumbnail are removed and the gallery and Library Insights are refreshed.
 
 This action affects the original media file. Confirm that your system Trash and
@@ -176,7 +227,7 @@ backups meet your recovery needs before using it.
 Each file's capture date comes from the first of these that exists:
 
 1. **Embedded metadata:** EXIF for images, and the creation time inside the video (read with FFmpeg).
-2. **A date macOS Spotlight found in the file's content.** It's ignored when it equals the
+2. **A date macOS Spotlight found in the file's content** (macOS only). It's ignored when it equals the
    file's own creation time, because then it's just when the file was copied to this disk.
 3. **The earlier of the file's creation and modification times.** Copying a file to a
    backup drive resets its creation time but keeps its modification time, so the earlier
@@ -199,6 +250,8 @@ on the index for organizational decisions.
 
 Animated images use their first readable frame for the cached thumbnail. Video
 thumbnail and embedded-date support depend on the bundled FFmpeg capability.
+In-app video playback uses Qt Multimedia; a video it can't play can still be opened
+in its default application from the viewer.
 
 ## Privacy and local data
 
@@ -226,8 +279,8 @@ confirmed **Move to Trash** action.
 
 ## Keyboard shortcuts
 
-On macOS, Qt presents the Control-based shortcuts below using the Command key where
-appropriate.
+The shortcuts below are shown for macOS. On Windows, use `Ctrl` in place of `⌘`
+(for example `Ctrl+O`), and `Shift` in place of `⇧`.
 
 | Action | Shortcut |
 | --- | --- |
@@ -242,6 +295,20 @@ appropriate.
 | Open settings | `⌘,` |
 | Close window | `⌘W` |
 
+In the viewer:
+
+| Action | Shortcut |
+| --- | --- |
+| Previous / next item | `←` / `→` |
+| First / last item | `Home` / `End` |
+| Back to the gallery or Video Library | `Esc` |
+| Play or pause a video (closes a photo) | `Space` |
+| Skip back / forward 5 seconds | `⇧←` / `⇧→` |
+| Mute | `M` |
+| Zoom in / out | `⌘=` / `⌘−` |
+| Fit or actual size | `⌘0` |
+| Move to Trash | `⌘⌫` |
+
 ## Project structure
 
 ```text
@@ -249,15 +316,19 @@ app.py                    Application entry point
 onthisday/
 ├── core/
 │   ├── database.py       SQLite repository and Library Insights queries
-│   ├── indexer.py        Recursive, incremental media indexing
-│   ├── media.py          Metadata detection and thumbnail generation
+│   ├── indexer.py        Recursive, incremental, parallel media indexing
+│   ├── media.py          Metadata detection, thumbnails, and viewer image decoding
 │   ├── models.py         Shared immutable data models
-│   └── settings.py       Local configuration persistence
+│   ├── settings.py       Local configuration persistence
+│   ├── workqueue.py      Background job queue for the viewer
+│   └── zoom.py           Zoom and pan arithmetic for the photo viewer
 └── ui/
-    ├── pages/            Gallery, Video Library, and Library Insights
+    ├── pages/            Gallery, Video Library, Library Insights, and the viewer
     ├── theme/            Color palettes, typography, metrics, and stylesheets
-    └── widgets/          Media cards, responsive flow layout, and shared controls
-tests/                    Storage, indexing, deletion, and analytics tests
+    ├── viewer_images.py  Background photo decoding with neighbour prefetch
+    └── widgets/          Media cards, photo canvas, video player, and shared controls
+tools/make_launcher.py    macOS app / Windows Start-menu shortcut builder
+tests/                    Storage, indexing, date, viewer, and Windows tests
 assets/screenshots/       Sanitized documentation screenshots
 ```
 
@@ -291,7 +362,8 @@ For this checkout, the project virtual environment can be used directly:
 - **A detected date looks wrong:** inspect the file's EXIF, embedded video metadata,
   Spotlight metadata, and filesystem timestamps.
 - **The app cannot move a file to Trash:** confirm that the file still exists and
-  the current user has permission to modify its containing folder.
+  the current user has permission to modify its containing folder. On Windows, files go
+  to the Recycle Bin, and a file can't be moved while another program has it open.
 
 ## Project status
 
