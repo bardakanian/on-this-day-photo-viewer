@@ -173,10 +173,19 @@ backups meet your recovery needs before using it.
 
 ## Capture-date detection
 
-For images, the app prefers embedded EXIF timestamps and then checks macOS metadata
-when available. For videos, it checks embedded metadata through FFmpeg, followed by
-macOS metadata and filesystem timestamps. A file's modification time is used as a
-final fallback when no stronger image date is available.
+Each file's capture date comes from the first of these that exists:
+
+1. **Embedded metadata:** EXIF for images, and the creation time inside the video (read with FFmpeg).
+2. **A date macOS Spotlight found in the file's content.** It's ignored when it equals the
+   file's own creation time, because then it's just when the file was copied to this disk.
+3. **The earlier of the file's creation and modification times.** Copying a file to a
+   backup drive resets its creation time but keeps its modification time, so the earlier
+   one is closer to when the photo or video was made.
+
+"Zero" and unset-clock dates (January 1, 1970, which shows as December 31, 1969 in US
+time zones; January 1, 1980; January 1, 1904; and dates in the future) are never treated
+as capture dates; the next source is used instead. After an update to these rules, the
+next scan re-reads every file once.
 
 Because metadata can be missing or incorrect, review detected dates before relying
 on the index for organizational decisions.

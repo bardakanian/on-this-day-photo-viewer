@@ -64,7 +64,7 @@ class MediaIndexer:
                             video_metadata_version=excluded.video_metadata_version
                     """, (
                         self.folder_root, resolved, file_size, modified_ns, *values,
-                        media_type, VIDEO_METADATA_VERSION if media_type == "video" else 0,
+                        media_type, VIDEO_METADATA_VERSION,
                     ))
                 except Exception:
                     errors += 1
@@ -96,10 +96,9 @@ class MediaIndexer:
                     stat = path.stat()
                     media_type = media_type_for_path(path)
                     old = cached.get(resolved)
-                    force_video = media_type == "video" and (
-                        old is None or old[2] != "video" or old[3] < VIDEO_METADATA_VERSION
-                    )
-                    if old and old[0] == stat.st_size and old[1] == stat.st_mtime_ns and not force_video:
+                    # Re-read unchanged files too when they were indexed by an older date-detection version.
+                    stale = old is None or old[2] != media_type or (old[3] or 0) < VIDEO_METADATA_VERSION
+                    if old and old[0] == stat.st_size and old[1] == stat.st_mtime_ns and not stale:
                         unchanged += 1
                     else:
                         future = executor.submit(get_capture_date, path, media_type)

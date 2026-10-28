@@ -20,5 +20,8 @@ THUMBNAIL_SIZE = (496, 372)
 # Older thumbnails are still shown as placeholders while sharper ones are generated.
 LEGACY_THUMBNAIL_SIZE = (240, 180)
 BATCH_COMMIT_SIZE = 250
-VIDEO_METADATA_VERSION = 5
+# Bump to make the next scan re-read every file's capture date. Despite the name (kept for
+# database compatibility) it applies to photos and videos since version 6, which stopped
+# dating metadata-less files by when they were copied; 7 ignores epoch and unset-clock dates.
+VIDEO_METADATA_VERSION = 7
 INITIAL_YEAR_BATCH = 60
