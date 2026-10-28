@@ -14,7 +14,7 @@ generation, search, and library analytics all stay on your computer.
 - Groups matching photos and videos by capture year for the selected month and day.
 - Browses the previous day, next day, or today's date from the main toolbar.
 - Filters the gallery to all media, photos only, or videos only.
-- Generates thumbnails away from the main interface and reuses cached results.
+- Generates Retina-ready thumbnails away from the main interface and reuses cached results.
 - Loads large year groups in batches to keep the gallery responsive.
 - Includes a searchable, sortable library of every indexed video.
 - Calculates folder-specific Library Insights from the existing SQLite index.
@@ -52,7 +52,8 @@ Search and sort indexed videos without leaving the desktop app.
 
 1. Choose the folder containing your photo and video library.
 2. The app recursively scans supported media and stores file details and detected
-   capture dates in a local SQLite index.
+   capture dates in a local SQLite index. High-resolution previews are cached for
+   sharp display, while compatible legacy thumbnails can appear as placeholders.
 3. The gallery queries that index for media captured on the selected month and day,
    then groups the results from newest to oldest year.
 4. Later scans reuse unchanged records, update changed files, and remove index

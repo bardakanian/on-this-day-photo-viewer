@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 from PIL import Image
 
-from onthisday.core import database, settings
+from onthisday.core import database, media, settings
 from onthisday.core.indexer import MediaIndexer
 from onthisday.core.settings import SettingsStore
 
@@ -25,6 +25,7 @@ class StorageTests(unittest.TestCase):
             patch.object(database, "APP_DIR", self.app_dir),
             patch.object(database, "DB_FILE", self.db_file),
             patch.object(database, "THUMBNAIL_DIR", self.thumb_dir),
+            patch.object(media, "THUMBNAIL_DIR", self.thumb_dir),
             patch.object(settings, "APP_DIR", self.app_dir),
             patch.object(settings, "CONFIG_FILE", self.config_file),
             patch.object(settings, "THUMBNAIL_DIR", self.thumb_dir),
@@ -104,6 +105,48 @@ class StorageTests(unittest.TestCase):
         self.assertEqual(events[0]["type"], "scan_started")
         self.assertEqual(events[-1]["type"], "scan_complete")
         self.assertEqual(events[-1]["total_indexed"], 1)
+
+    def test_image_thumbnail_respects_exif_rotation(self):
+        source = self.root / "rotated.jpg"
+        exif = Image.Exif()
+        exif[0x0112] = 6  # Rotate 90° clockwise when displayed
+        Image.new("RGB", (4000, 3000), "red").save(source, exif=exif)
+        thumbnail = media.get_cached_thumbnail(source, "image", 1, 1)
+        with Image.open(thumbnail) as result:
+            self.assertEqual(result.size, media.THUMBNAIL_SIZE)
+            # Portrait after rotation: padded at the sides, image in the middle.
+            self.assertLess(sum(result.getpixel((5, result.height // 2))), 100)
+            self.assertGreater(result.getpixel((result.width // 2, result.height // 2))[0], 200)
+
+    def test_failed_thumbnail_is_not_retried(self):
+        source = self.root / "broken.jpg"
+        source.write_bytes(b"not an image")
+        self.assertIsNone(media.get_cached_thumbnail(source, "image", 1, 1))
+        with patch.object(media, "_image_thumbnail") as generate:
+            self.assertIsNone(media.get_cached_thumbnail(source, "image", 1, 1))
+            generate.assert_not_called()
+        # A changed file (new size/mtime) gets a fresh attempt.
+        with patch.object(media, "_image_thumbnail") as generate:
+            media.get_cached_thumbnail(source, "image", 2, 2)
+            generate.assert_called_once()
+
+    def test_missing_source_is_retried_later(self):
+        source = self.root / "unmounted" / "photo.jpg"
+        self.assertIsNone(media.get_cached_thumbnail(source, "image", 1, 1))
+        self.assertEqual([path for path in media.thumbnail_cache_files(source, 1, 1) if path.exists()], [])
+
+    @unittest.skipUnless(media.FFMPEG_ENABLED, "ffmpeg not installed")
+    def test_video_shorter_than_one_second_gets_thumbnail(self):
+        import subprocess
+        source = self.root / "short.mp4"
+        subprocess.run([
+            media.imageio_ffmpeg.get_ffmpeg_exe(), "-y", "-f", "lavfi", "-i", "color=c=blue:s=320x240:d=0.4",
+            "-pix_fmt", "yuv420p", str(source),
+        ], capture_output=True, check=True)
+        thumbnail = media.get_cached_thumbnail(source, "video", 1, 1)
+        self.assertIsNotNone(thumbnail)
+        with Image.open(thumbnail) as result:
+            self.assertEqual(result.size, media.THUMBNAIL_SIZE)
 
     def insert_analytics_rows(self, folder: Path, rows: list[tuple[str, int | None, int | None, int | None]]) -> None:
         """Insert (media_type, year, month, day) rows for repository tests."""

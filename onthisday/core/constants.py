@@ -15,8 +15,10 @@ VIDEO_EXTENSIONS = {
     ".mpg", ".3gp",
 }
 SUPPORTED_EXTENSIONS = IMAGE_EXTENSIONS | VIDEO_EXTENSIONS
-# Keep the legacy cache signature so existing user thumbnails remain reusable.
-THUMBNAIL_SIZE = (240, 180)
+# Rendered at 2x the 248x186 preview so thumbnails stay sharp on Retina displays.
+THUMBNAIL_SIZE = (496, 372)
+# Older thumbnails are still shown as placeholders while sharper ones are generated.
+LEGACY_THUMBNAIL_SIZE = (240, 180)
 BATCH_COMMIT_SIZE = 250
 VIDEO_METADATA_VERSION = 5
 INITIAL_YEAR_BATCH = 60

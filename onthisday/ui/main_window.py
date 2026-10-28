@@ -12,7 +12,7 @@ from PySide6.QtWidgets import (
 
 from ..core.database import MediaRepository
 from ..core.indexer import MediaIndexer
-from ..core.media import FFMPEG_ENABLED, HEIC_ENABLED, open_in_default_app, thumbnail_cache_path
+from ..core.media import FFMPEG_ENABLED, HEIC_ENABLED, open_in_default_app, thumbnail_cache_files
 from ..core.models import MediaRecord
 from ..core.settings import SettingsStore
 from .dialogs import PreferencesDialog
@@ -411,13 +411,14 @@ class MainWindow(QMainWindow):
         if dialog.clickedButton() is not move_button:
             return
 
-        cached_thumbnail = thumbnail_cache_path(record.path, record.file_size, record.modified_ns)
+        cached_files = thumbnail_cache_files(record.path, record.file_size, record.modified_ns)
         if not QFile.moveToTrash(str(record.path)):
             self._error("Unable to move file", "The file could not be moved to Trash. Check that it still exists and that you have permission to change it.")
             return
         try:
             self.repository.remove(folder, record.path)
-            cached_thumbnail.unlink(missing_ok=True)
+            for cached in cached_files:
+                cached.unlink(missing_ok=True)
         except OSError:
             LOGGER.exception("Media moved to Trash, but cached data could not be removed")
         except Exception:

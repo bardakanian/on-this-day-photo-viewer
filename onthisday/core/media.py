@@ -7,7 +7,7 @@ from pathlib import Path
 
 from PIL import Image, ImageOps
 
-from .constants import THUMBNAIL_DIR, THUMBNAIL_SIZE, VIDEO_EXTENSIONS
+from .constants import LEGACY_THUMBNAIL_SIZE, THUMBNAIL_DIR, THUMBNAIL_SIZE, VIDEO_EXTENSIONS
 from .database import ensure_app_dirs
 
 try:
@@ -125,19 +125,39 @@ def get_capture_date(path: Path, media_type: str) -> datetime | None:
         return None
 
 
-def thumbnail_cache_path(path: Path, file_size: int, modified_ns: int) -> Path:
-    signature = f"{path}|{file_size}|{modified_ns}|{THUMBNAIL_SIZE[0]}x{THUMBNAIL_SIZE[1]}"
+def thumbnail_cache_path(
+    path: Path, file_size: int, modified_ns: int, size: tuple[int, int] = THUMBNAIL_SIZE,
+) -> Path:
+    signature = f"{path}|{file_size}|{modified_ns}|{size[0]}x{size[1]}"
     return THUMBNAIL_DIR / f"{hashlib.sha256(signature.encode()).hexdigest()}.jpg"
+
+
+def legacy_thumbnail_cache_path(path: Path, file_size: int, modified_ns: int) -> Path:
+    return thumbnail_cache_path(path, file_size, modified_ns, LEGACY_THUMBNAIL_SIZE)
+
+
+def _failure_marker(target: Path) -> Path:
+    return target.with_suffix(".failed")
+
+
+def thumbnail_cache_files(path: Path, file_size: int, modified_ns: int) -> list[Path]:
+    """Every cache file that may exist for one media item."""
+    target = thumbnail_cache_path(path, file_size, modified_ns)
+    return [target, _failure_marker(target), legacy_thumbnail_cache_path(path, file_size, modified_ns)]
 
 
 def _image_thumbnail(source: Path, target: Path) -> None:
     with Image.open(source) as image:
-        image = ImageOps.exif_transpose(image)
         if getattr(image, "is_animated", False):
             try:
                 image.seek(0)
             except EOFError:
                 pass
+        # Let JPEGs decode at a reduced scale. This must happen before exif_transpose
+        # loads the full image; a square request covers both rotated orientations.
+        longest = max(THUMBNAIL_SIZE)
+        image.draft("RGB", (longest, longest))
+        image = ImageOps.exif_transpose(image)
         image = image.convert("RGB")
         image.thumbnail(THUMBNAIL_SIZE, Image.Resampling.LANCZOS)
         canvas = Image.new("RGB", THUMBNAIL_SIZE, (18, 20, 24))
@@ -146,19 +166,22 @@ def _image_thumbnail(source: Path, target: Path) -> None:
 
 
 def _video_thumbnail(source: Path, target: Path) -> bool:
-    if not FFMPEG_ENABLED:
-        return False
-    try:
-        subprocess.run([
-            imageio_ffmpeg.get_ffmpeg_exe(), "-y", "-ss", "1", "-i", str(source),
-            "-frames:v", "1", "-vf",
-            f"scale={THUMBNAIL_SIZE[0]}:{THUMBNAIL_SIZE[1]}:force_original_aspect_ratio=decrease,"
-            f"pad={THUMBNAIL_SIZE[0]}:{THUMBNAIL_SIZE[1]}:(ow-iw)/2:(oh-ih)/2",
-            "-q:v", "3", str(target),
-        ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30, check=False)
-        return target.exists() and target.stat().st_size > 0
-    except (OSError, subprocess.SubprocessError):
-        return False
+    # Prefer a frame one second in (skips black fade-ins); clips shorter than that
+    # produce nothing, so fall back to the very first frame.
+    for seek in (["-ss", "1"], []):
+        try:
+            subprocess.run([
+                imageio_ffmpeg.get_ffmpeg_exe(), "-y", *seek, "-i", str(source),
+                "-frames:v", "1", "-vf",
+                f"scale={THUMBNAIL_SIZE[0]}:{THUMBNAIL_SIZE[1]}:force_original_aspect_ratio=decrease,"
+                f"pad={THUMBNAIL_SIZE[0]}:{THUMBNAIL_SIZE[1]}:(ow-iw)/2:(oh-ih)/2",
+                "-q:v", "3", str(target),
+            ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30, check=False)
+        except (OSError, subprocess.SubprocessError):
+            continue
+        if target.exists() and target.stat().st_size > 0:
+            return True
+    return False
 
 
 def get_cached_thumbnail(path: Path, media_type: str, file_size: int, modified_ns: int) -> Path | None:
@@ -166,16 +189,26 @@ def get_cached_thumbnail(path: Path, media_type: str, file_size: int, modified_n
     target = thumbnail_cache_path(path, file_size, modified_ns)
     if target.exists():
         return target
+    failed = _failure_marker(target)
+    if failed.exists():
+        return None
+    if media_type == "video" and not FFMPEG_ENABLED:
+        return None
     try:
         if media_type == "video":
             if not _video_thumbnail(path, target):
-                return None
+                raise OSError("ffmpeg produced no frame")
         else:
             _image_thumbnail(path, target)
         return target
     except (OSError, ValueError):
         try:
             target.unlink(missing_ok=True)
+            # Remember the failure so the file isn't re-decoded every time it is shown.
+            # Skip this when the source is missing (e.g. an unmounted drive) so it retries later.
+            # The cache key includes size and mtime, so editing the file also retries.
+            if path.exists():
+                failed.touch()
         except OSError:
             pass
         return None

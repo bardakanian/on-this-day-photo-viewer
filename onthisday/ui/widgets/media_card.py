@@ -4,7 +4,7 @@ from PySide6.QtCore import QObject, QRunnable, Qt, QThreadPool, Signal
 from PySide6.QtGui import QCursor, QMouseEvent, QPixmap
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QSizePolicy, QVBoxLayout
 
-from ...core.media import get_cached_thumbnail, thumbnail_cache_path
+from ...core.media import get_cached_thumbnail, legacy_thumbnail_cache_path, thumbnail_cache_path
 from ...core.models import MediaRecord
 
 
@@ -88,6 +88,10 @@ class MediaCard(QFrame):
         if cached.exists():
             self._set_thumbnail(cached)
         else:
+            # Show an older low-resolution thumbnail immediately while the sharp one renders.
+            legacy = legacy_thumbnail_cache_path(record.path, record.file_size, record.modified_ns)
+            if legacy.exists():
+                self._set_thumbnail(legacy)
             task = _ThumbnailTask(record)
             task.signals.ready.connect(self._set_thumbnail)
             self._task = task
@@ -99,7 +103,10 @@ class MediaCard(QFrame):
         pixmap = QPixmap(str(path))
         if pixmap.isNull():
             return
-        self.preview.setPixmap(pixmap.scaled(
-            self.preview.size(), Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation
-        ))
+        ratio = self.devicePixelRatioF()
+        scaled = pixmap.scaled(
+            self.preview.size() * ratio, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation
+        )
+        scaled.setDevicePixelRatio(ratio)
+        self.preview.setPixmap(scaled)
         self._task = None

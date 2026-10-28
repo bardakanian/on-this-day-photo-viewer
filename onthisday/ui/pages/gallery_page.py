@@ -94,6 +94,8 @@ class GalleryPage(QWidget):
         outer.addWidget(self.scroll, 1)
 
     def show_records(self, records: list[MediaRecord], selected_date: date, media_filter: str, folder: Path | None) -> None:
+        # Drop queued thumbnail jobs for cards about to be destroyed; running ones just finish.
+        self.pool.clear()
         while self.content_layout.count():
             item = self.content_layout.takeAt(0)
             widget = item.widget()
