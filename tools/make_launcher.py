@@ -1,15 +1,22 @@
-"""Build a small macOS launcher app ("On This Day.app") that runs this project.
+"""Add On This Day to the macOS Applications folder or the Windows Start menu.
 
+macOS:
     python tools/make_launcher.py              # builds dist/On This Day.app and installs it in /Applications
     python tools/make_launcher.py --user       # installs in ~/Applications instead
     python tools/make_launcher.py --no-install # only builds dist/On This Day.app
 
+Windows:
+    python tools/make_launcher.py              # adds an "On This Day" shortcut to the Start menu
+    python tools/make_launcher.py --desktop    # adds one to the Desktop as well
+
 The launcher contains no code of its own: it runs app.py with the project's .venv, so it
 always starts the latest code. Re-run this script if you move the project folder.
-Output and errors from the app go to ~/.on_this_day_photo_viewer/launcher.log.
+On macOS, output and errors from the app go to ~/.on_this_day_photo_viewer/launcher.log;
+on Windows the app runs without a console (pythonw) and logs to the same folder.
 """
 
 import argparse
+import os
 import plistlib
 import shlex
 import shutil
@@ -182,13 +189,75 @@ def install(bundle: Path, applications: Path) -> Path:
     return target
 
 
+# Windows ------------------------------------------------------------------------
+
+ICO_SIZES = [(16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)]
+
+# Creates a .lnk through Windows' own scripting object, so no extra Python package is needed.
+# Values arrive as environment variables to avoid any quoting problems with paths.
+SHORTCUT_SCRIPT = (
+    "$s = (New-Object -ComObject WScript.Shell).CreateShortcut($env:OTD_LINK); "
+    "$s.TargetPath = $env:OTD_TARGET; $s.Arguments = $env:OTD_ARGUMENTS; "
+    "$s.WorkingDirectory = $env:OTD_WORKDIR; $s.IconLocation = $env:OTD_ICON; "
+    "$s.Description = $env:OTD_DESCRIPTION; $s.Save()"
+)
+
+
+def windows_folders(desktop: bool) -> list[Path]:
+    """The current user's Start menu Programs folder, plus the Desktop if asked."""
+    appdata = os.environ.get("APPDATA")
+    if not appdata:
+        sys.exit("APPDATA is not set, so the Start menu folder can't be found.")
+    folders = [Path(appdata) / "Microsoft" / "Windows" / "Start Menu" / "Programs"]
+    if desktop:
+        folders.append(Path(os.environ.get("USERPROFILE", Path.home())) / "Desktop")
+    return folders
+
+
+def shortcut_environment(link: Path, pythonw: Path, app: Path, icon: Path) -> dict[str, str]:
+    return {
+        "OTD_LINK": str(link),
+        "OTD_TARGET": str(pythonw),
+        "OTD_ARGUMENTS": f'"{app}"',
+        "OTD_WORKDIR": str(app.parent),
+        "OTD_ICON": f"{icon},0",
+        "OTD_DESCRIPTION": "Rediscover photos and videos from this day in past years",
+    }
+
+
+def install_windows(desktop: bool) -> list[Path]:
+    # pythonw runs the app without opening a console window.
+    pythonw = PROJECT / ".venv" / "Scripts" / "pythonw.exe"
+    app = PROJECT / "app.py"
+    if not pythonw.exists():
+        sys.exit(f"No virtual environment at {pythonw.parent}. Create it first (see README).")
+    icon = PROJECT / "dist" / f"{APP_NAME}.ico"
+    icon.parent.mkdir(exist_ok=True)
+    draw_icon(256).save(icon, sizes=ICO_SIZES)
+    created = []
+    for folder in windows_folders(desktop):
+        folder.mkdir(parents=True, exist_ok=True)
+        link = folder / f"{APP_NAME}.lnk"
+        subprocess.run(
+            ["powershell", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", SHORTCUT_SCRIPT],
+            env={**os.environ, **shortcut_environment(link, pythonw, app, icon)}, check=True,
+        )
+        created.append(link)
+    return created
+
+
 def main() -> None:
-    if sys.platform != "darwin":
-        sys.exit("The launcher is for macOS. On other systems, run: python app.py")
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--no-install", action="store_true", help="don't copy the app into an Applications folder")
-    parser.add_argument("--user", action="store_true", help="install in ~/Applications instead of /Applications")
+    parser.add_argument("--no-install", action="store_true", help="macOS: don't copy the app into an Applications folder")
+    parser.add_argument("--user", action="store_true", help="macOS: install in ~/Applications instead of /Applications")
+    parser.add_argument("--desktop", action="store_true", help="Windows: also add a shortcut to the Desktop")
     args = parser.parse_args()
+    if sys.platform == "win32":
+        for link in install_windows(args.desktop):
+            print(f"Created {link}")
+        return
+    if sys.platform != "darwin":
+        sys.exit("The launcher is for macOS and Windows. On other systems, run: python app.py")
     bundle = build(PROJECT / "dist")
     print(f"Built {bundle}")
     if not args.no_install:

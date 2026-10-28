@@ -8,6 +8,11 @@ from ..widgets.image_canvas import ImageCanvas
 from ..widgets.video_player import VideoPlayer
 
 
+def native_keys(keys: str) -> str:
+    """A shortcut as this platform writes it: "Ctrl+0" reads ⌘0 on macOS and Ctrl+0 on Windows."""
+    return QKeySequence(keys).toString(QKeySequence.SequenceFormat.NativeText)
+
+
 class ViewerPage(QWidget):
     """Full-window viewer for one item at a time, with previous/next navigation."""
 
@@ -62,7 +67,7 @@ class ViewerPage(QWidget):
         self.zoom_label.setMinimumWidth(48)
         self.zoom_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         bar.addWidget(self.zoom_label)
-        self.fit_button = self._button("100%", "Actual size (⌘0)")
+        self.fit_button = self._button("100%", f"Actual size ({native_keys('Ctrl+0')})")
         self.fit_button.clicked.connect(lambda: self.canvas.toggle_actual_size())
         bar.addWidget(self.fit_button)
         self.position_label = QLabel()
@@ -74,7 +79,7 @@ class ViewerPage(QWidget):
         open_button = self._button("Open in Default App", "Open in the default app")
         open_button.clicked.connect(self._open_externally)
         bar.addWidget(open_button)
-        trash = self._button("Move to Trash", "Move to Trash (⌘⌫)")
+        trash = self._button("Move to Trash", f"Move to Trash ({native_keys('Ctrl+Backspace')})")
         trash.setProperty("variant", "danger")
         trash.clicked.connect(self._trash_current)
         bar.addWidget(trash)
@@ -262,7 +267,7 @@ class ViewerPage(QWidget):
     def _zoom_changed(self, scale: float) -> None:
         self.zoom_label.setText("Fit" if self.canvas.is_fitted else f"{round(scale * 100)}%")
         self.fit_button.setText("100%" if self.canvas.is_fitted else "Fit")
-        self.fit_button.setToolTip("Actual size (⌘0)" if self.canvas.is_fitted else "Zoom to fit (⌘0)")
+        self.fit_button.setToolTip(f"{'Actual size' if self.canvas.is_fitted else 'Zoom to fit'} ({native_keys('Ctrl+0')})")
 
     def _space(self) -> None:
         item = self.current_item

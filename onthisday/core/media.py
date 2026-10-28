@@ -27,6 +27,10 @@ except ImportError:
 
 Image.MAX_IMAGE_PIXELS = None
 
+# On Windows, run ffmpeg without a console window. Otherwise, when the app has no console of
+# its own (started from a shortcut with pythonw), one would flash up for every video processed.
+_NO_CONSOLE = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+
 
 def media_type_for_path(path: Path) -> str:
     return "video" if path.suffix.lower() in VIDEO_EXTENSIONS else "image"
@@ -125,7 +129,7 @@ def get_video_metadata_date(path: Path) -> datetime | None:
     try:
         result = subprocess.run(
             [imageio_ffmpeg.get_ffmpeg_exe(), "-hide_banner", "-i", str(path)],
-            capture_output=True, text=True, timeout=10, check=False,
+            capture_output=True, text=True, timeout=10, check=False, creationflags=_NO_CONSOLE,
         )
         candidates = []
         for line in result.stderr.splitlines():
@@ -164,8 +168,10 @@ def get_filesystem_date(path: Path) -> datetime | None:
         stat = path.stat()
     except OSError:
         return None
-    candidates = [datetime.fromtimestamp(stamp) for stamp in
-                  (stat.st_mtime, getattr(stat, "st_birthtime", stat.st_mtime)) if stamp > 0]
+    # st_birthtime exists on macOS, and on Windows from Python 3.12; before that Windows
+    # reports the creation time as st_ctime (elsewhere st_ctime is the last metadata change).
+    created = getattr(stat, "st_birthtime", stat.st_ctime if os.name == "nt" else stat.st_mtime)
+    candidates = [datetime.fromtimestamp(stamp) for stamp in (stat.st_mtime, created) if stamp > 0]
     # Ignore zero and unset-clock timestamps some filesystems and memory cards report.
     valid = [value for value in candidates if not is_placeholder_date(value)]
     return min(valid or candidates, default=None)
@@ -228,7 +234,8 @@ def _video_thumbnail(source: Path, target: Path) -> bool:
                 f"scale={THUMBNAIL_SIZE[0]}:{THUMBNAIL_SIZE[1]}:force_original_aspect_ratio=decrease,"
                 f"pad={THUMBNAIL_SIZE[0]}:{THUMBNAIL_SIZE[1]}:(ow-iw)/2:(oh-ih)/2",
                 "-q:v", "3", str(target),
-            ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30, check=False)
+            ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30, check=False,
+                creationflags=_NO_CONSOLE)
         except (OSError, subprocess.SubprocessError):
             continue
         if target.exists() and target.stat().st_size > 0:
