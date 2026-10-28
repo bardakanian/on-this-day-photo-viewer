@@ -4,6 +4,7 @@ import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
+from typing import Callable
 
 from PIL import Image, ImageOps
 
@@ -160,7 +161,7 @@ def _image_thumbnail(source: Path, target: Path) -> None:
         image = ImageOps.exif_transpose(image)
         image = image.convert("RGB")
         image.thumbnail(THUMBNAIL_SIZE, Image.Resampling.LANCZOS)
-        canvas = Image.new("RGB", THUMBNAIL_SIZE, (18, 20, 24))
+        canvas = Image.new("RGB", THUMBNAIL_SIZE, THUMBNAIL_PADDING)
         canvas.paste(image, ((THUMBNAIL_SIZE[0] - image.width) // 2, (THUMBNAIL_SIZE[1] - image.height) // 2))
         canvas.save(target, "JPEG", quality=87, optimize=True)
 
@@ -225,3 +226,77 @@ def open_in_default_app(path: Path) -> tuple[bool, str | None]:
         return True, None
     except OSError as exc:
         return False, str(exc)
+
+
+def load_display_image(path: Path, max_edge: int) -> Image.Image:
+    """Decode a photo for the viewer: EXIF-rotated, at most `max_edge` on its longest side."""
+    with Image.open(path) as image:
+        if getattr(image, "is_animated", False):
+            try:
+                image.seek(0)
+            except EOFError:
+                pass
+        image.draft("RGB", (max_edge, max_edge))
+        image = ImageOps.exif_transpose(image)
+        image = image.convert("RGBA") if image.mode in {"RGBA", "LA", "P"} else image.convert("RGB")
+        if max(image.size) > max_edge:
+            image.thumbnail((max_edge, max_edge), Image.Resampling.LANCZOS)
+        return image
+
+
+THUMBNAIL_PADDING = (18, 20, 24)  # canvas colour of photo thumbnails (video ones are padded black)
+
+
+def letterbox_content_rect(
+    width: int, height: int, pixel: Callable[[int, int], tuple[int, int, int]], tolerance: int = 12,
+) -> tuple[int, int, int, int] | None:
+    """Find the picture inside a padded thumbnail as (x, y, width, height).
+
+    Thumbnails are letterboxed with THUMBNAIL_PADDING, so the picture touches two opposite
+    edges and is centred. Only the middle row and column are sampled. Returns None when the
+    result isn't believable (e.g. a dark photo whose own edges look like padding).
+    """
+    def is_padding(x: int, y: int) -> bool:
+        return all(abs(a - b) <= tolerance for a, b in zip(pixel(x, y), THUMBNAIL_PADDING))
+
+    def span(length: int, sample: Callable[[int], bool]) -> tuple[int, int]:
+        start = 0
+        while start < length and sample(start):
+            start += 1
+        end = length
+        while end > start and sample(end - 1):
+            end -= 1
+        return start, end
+
+    left, right = span(width, lambda x: is_padding(x, height // 2))
+    top, bottom = span(height, lambda y: is_padding(width // 2, y))
+    content_w, content_h = right - left, bottom - top
+    if content_w <= 0 or content_h <= 0:
+        return None
+    # Padding is on one axis only and equal on both sides (allow a couple of pixels for JPEG noise).
+    padded_x, padded_y = width - content_w > 2, height - content_h > 2
+    if padded_x and padded_y:
+        return None
+    if abs(left - (width - right)) > 3 or abs(top - (height - bottom)) > 3:
+        return None
+    if content_w < width * 0.25 or content_h < height * 0.25:
+        return None
+    return left, top, content_w, content_h
+
+
+def format_duration(milliseconds: int) -> str:
+    total = max(0, int(round(milliseconds / 1000)))
+    hours, remainder = divmod(total, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    return f"{hours}:{minutes:02d}:{seconds:02d}" if hours else f"{minutes}:{seconds:02d}"
+
+
+def display_size(path: Path) -> tuple[int, int] | None:
+    """Pixel size of a photo as displayed (EXIF rotation applied), read from the header only."""
+    try:
+        with Image.open(path) as image:
+            width, height = image.size
+            orientation = image.getexif().get(0x0112, 1)
+    except (OSError, ValueError, TypeError):
+        return None
+    return (height, width) if orientation in (5, 6, 7, 8) else (width, height)

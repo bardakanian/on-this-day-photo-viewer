@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 from PIL import Image
 
-from onthisday.core import database, media, settings
+from onthisday.core import database, indexer, media, settings
 from onthisday.core.indexer import MediaIndexer
 from onthisday.core.settings import SettingsStore
 
@@ -147,6 +147,61 @@ class StorageTests(unittest.TestCase):
         self.assertIsNotNone(thumbnail)
         with Image.open(thumbnail) as result:
             self.assertEqual(result.size, media.THUMBNAIL_SIZE)
+
+    def test_indexer_reads_dates_in_parallel(self):
+        media_root = self.root / "parallel"
+        media_root.mkdir()
+        for day in range(1, 41):
+            exif = Image.Exif()
+            exif[306] = f"2019:03:{day % 28 + 1:02d} 10:00:00"
+            Image.new("RGB", (8, 8)).save(media_root / f"photo-{day}.jpg", exif=exif)
+        events = []
+        MediaIndexer(media_root, threading.Event(), 1, events.append).run()
+        self.assertEqual(events[-1]["type"], "scan_complete")
+        self.assertEqual((events[-1]["total_indexed"], events[-1]["updated"], events[-1]["errors"]), (40, 40, 0))
+        connection = database.open_database()
+        dates = {Path(path).name: ts for path, ts in connection.execute("SELECT file_path, capture_ts FROM photos")}
+        connection.close()
+        self.assertEqual(dates["photo-5.jpg"], "2019-03-06T10:00:00")
+        # A second scan finds everything unchanged and reads no metadata.
+        events = []
+        with patch.object(indexer, "get_capture_date") as read_date:
+            MediaIndexer(media_root, threading.Event(), 2, events.append).run()
+            read_date.assert_not_called()
+        self.assertEqual(events[-1]["unchanged"], 40)
+
+    def test_indexer_counts_metadata_errors_per_file(self):
+        media_root = self.root / "errors"
+        media_root.mkdir()
+        for name in ("good.jpg", "bad.jpg"):
+            Image.new("RGB", (8, 8)).save(media_root / name)
+        real = indexer.get_capture_date
+
+        def flaky(path, media_type):
+            if path.name == "bad.jpg":
+                raise RuntimeError("unreadable")
+            return real(path, media_type)
+
+        events = []
+        with patch.object(indexer, "get_capture_date", side_effect=flaky):
+            MediaIndexer(media_root, threading.Event(), 1, events.append).run()
+        self.assertEqual((events[-1]["errors"], events[-1]["total_indexed"]), (1, 1))
+
+    def test_indexer_cancel_stops_scan(self):
+        media_root = self.root / "cancel"
+        media_root.mkdir()
+        for index in range(20):
+            Image.new("RGB", (8, 8)).save(media_root / f"{index}.jpg")
+        stop = threading.Event()
+
+        def stop_on_first(path, media_type):
+            stop.set()
+            return None
+
+        events = []
+        with patch.object(indexer, "get_capture_date", side_effect=stop_on_first):
+            MediaIndexer(media_root, stop, 1, events.append).run()
+        self.assertEqual(events[-1]["type"], "scan_cancelled")
 
     def insert_analytics_rows(self, folder: Path, rows: list[tuple[str, int | None, int | None, int | None]]) -> None:
         """Insert (media_type, year, month, day) rows for repository tests."""

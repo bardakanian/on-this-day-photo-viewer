@@ -58,4 +58,16 @@ def build_stylesheet(c: Palette) -> str:
     QMenu::item {{ padding: 7px 28px 7px 10px; border-radius: 5px; }}
     QMenu::item:selected {{ background: {c.selection}; }}
     QStatusBar {{ background: {c.surface}; border-top: 1px solid {c.border}; color: {c.text_muted}; }}
+    QWidget#viewerPage {{ background: #0B0C0E; }}
+    QFrame[role="viewerBar"] {{ background: rgba(18, 20, 24, 0.94); border: none; }}
+    QFrame[role="viewerBar"] QLabel {{ color: #ECEEF2; }}
+    QFrame[role="viewerBar"] QLabel[muted="true"] {{ color: #A6ADBA; }}
+    QFrame[role="viewerBar"] QPushButton {{ background: rgba(255,255,255,0.08); color: #ECEEF2; border: 1px solid rgba(255,255,255,0.14); }}
+    QFrame[role="viewerBar"] QPushButton:hover {{ background: rgba(255,255,255,0.16); }}
+    QFrame[role="viewerBar"] QPushButton:checked {{ background: rgba(255,255,255,0.24); }}
+    QFrame[role="viewerBar"] QPushButton:disabled {{ color: rgba(236,238,242,0.35); background: transparent; border-color: rgba(255,255,255,0.08); }}
+    QFrame[role="viewerBar"] QPushButton[variant="danger"] {{ color: #EE7180; background: transparent; border-color: #EE7180; }}
+    QFrame[role="viewerBar"] QSlider::groove:horizontal {{ background: rgba(255,255,255,0.25); height: 4px; border-radius: 2px; }}
+    QFrame[role="viewerBar"] QSlider::sub-page:horizontal {{ background: {c.accent}; border-radius: 2px; }}
+    QFrame[role="viewerBar"] QSlider::handle:horizontal {{ background: #ECEEF2; width: 12px; margin: -4px 0; border-radius: 6px; }}
     """

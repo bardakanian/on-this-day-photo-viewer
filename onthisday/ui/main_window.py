@@ -13,10 +13,10 @@ from PySide6.QtWidgets import (
 from ..core.database import MediaRepository
 from ..core.indexer import MediaIndexer
 from ..core.media import FFMPEG_ENABLED, HEIC_ENABLED, open_in_default_app, thumbnail_cache_files
-from ..core.models import MediaRecord
+from ..core.models import MediaRecord, VideoRecord, ViewerItem
 from ..core.settings import SettingsStore
 from .dialogs import PreferencesDialog
-from .pages import GalleryPage, LibraryInsightsPage, VideosPage
+from .pages import GalleryPage, LibraryInsightsPage, VideosPage, ViewerPage
 from .theme import ThemeManager
 
 LOGGER = logging.getLogger(__name__)
@@ -51,6 +51,36 @@ class AnalyticsLoadTask(QRunnable):
             pass
 
 
+class GalleryEvents(QObject):
+    received = Signal(object)
+
+
+class GalleryLoadTask(QRunnable):
+    """Run the date query off the UI thread; it checks every file exists, which is slow on network drives."""
+
+    def __init__(self, repository: MediaRepository, folder: Path, selected_date: date, media_filter: str,
+                 request_id: int, emit):
+        super().__init__()
+        self.repository = repository
+        self.folder = folder
+        self.selected_date = selected_date
+        self.media_filter = media_filter
+        self.request_id = request_id
+        self.emit = emit
+
+    def run(self) -> None:
+        event = {"request_id": self.request_id, "folder": self.folder,
+                 "date": self.selected_date, "filter": self.media_filter}
+        try:
+            event["records"] = self.repository.matches_for_date(self.folder, self.selected_date, self.media_filter)
+        except Exception as exc:
+            event["error"] = exc
+        try:
+            self.emit(event)
+        except RuntimeError:
+            pass
+
+
 class MainWindow(QMainWindow):
     def __init__(self, app: QApplication):
         super().__init__()
@@ -71,6 +101,11 @@ class MainWindow(QMainWindow):
         self.analytics_pool = QThreadPool(self)
         self.analytics_pool.setMaxThreadCount(1)
         self.analytics_request_id = 0
+        self.gallery_events = GalleryEvents()
+        self.gallery_events.received.connect(self._handle_gallery_event)
+        self.gallery_pool = QThreadPool(self)
+        self.gallery_pool.setMaxThreadCount(1)
+        self.gallery_request_id = 0
 
         self.setWindowTitle("On This Day")
         self.setMinimumSize(900, 620)
@@ -92,6 +127,7 @@ class MainWindow(QMainWindow):
 
         toolbar = QFrame()
         toolbar.setProperty("role", "toolbar")
+        self.toolbar = toolbar
         toolbar_layout = QHBoxLayout(toolbar)
         toolbar_layout.setContentsMargins(18, 10, 18, 10)
         toolbar_layout.setSpacing(8)
@@ -150,12 +186,12 @@ class MainWindow(QMainWindow):
         self.stack = QStackedWidget()
         self.gallery = GalleryPage()
         self.gallery.choose_folder_requested.connect(self.choose_folder)
-        self.gallery.open_requested.connect(self.open_media)
+        self.gallery.open_requested.connect(self._open_from_gallery)
         self.gallery.delete_requested.connect(self.delete_media)
         self.videos = VideosPage()
         self.videos.back_requested.connect(lambda: self.stack.setCurrentWidget(self.gallery))
         self.videos.refresh_requested.connect(self._load_videos)
-        self.videos.open_requested.connect(self.open_media)
+        self.videos.open_requested.connect(self._open_from_videos)
         self.insights = LibraryInsightsPage(self.theme.colors)
         self.insights.back_requested.connect(self.show_gallery)
         self.insights.choose_folder_requested.connect(self.choose_folder)
@@ -165,6 +201,12 @@ class MainWindow(QMainWindow):
         self.stack.addWidget(self.gallery)
         self.stack.addWidget(self.videos)
         self.stack.addWidget(self.insights)
+        self.viewer = ViewerPage()
+        self.viewer.closed.connect(self._close_viewer)
+        self.viewer.open_externally_requested.connect(lambda item: self.open_media(item.path))
+        self.viewer.trash_requested.connect(self._trash_from_viewer)
+        self.stack.addWidget(self.viewer)
+        self._viewer_return: QWidget | None = None
         self.stack.currentChanged.connect(self._page_changed)
         root_layout.addWidget(self.stack, 1)
         self.status = QLabel("Ready")
@@ -305,21 +347,71 @@ class MainWindow(QMainWindow):
                 self._error("Unable to index the library", "The folder may be unavailable or contain files that cannot be read. Details were written to the application log.")
 
     def refresh_gallery(self) -> None:
-        records = []
-        if self.root_folder:
-            try:
-                records = self.repository.matches_for_date(self.root_folder, self.current_date, self.media_filter)
-            except Exception:
-                LOGGER.exception("Could not query gallery records")
-                self._error("Unable to load your library", "The media index could not be read. Try rescanning the library.")
-        self.gallery.show_records(records, self.current_date, self.media_filter, self.root_folder)
+        self.gallery_request_id += 1
+        folder = self.root_folder
+        if folder is None:
+            self.gallery.show_records([], self.current_date, self.media_filter, None)
+            return
+        # Only the latest request matters; drop any queued ones when clicking through days.
+        self.gallery_pool.clear()
+        self.gallery_pool.start(GalleryLoadTask(
+            self.repository, folder, self.current_date, self.media_filter,
+            self.gallery_request_id, self.gallery_events.received.emit,
+        ))
+
+    def _handle_gallery_event(self, event: dict) -> None:
+        if event.get("request_id") != self.gallery_request_id or event.get("folder") != self.root_folder:
+            return
+        records = event.get("records", [])
+        if "error" in event:
+            LOGGER.error("Could not query gallery records: %s", event["error"])
+            self._error("Unable to load your library", "The media index could not be read. Try rescanning the library.")
+        self.gallery.show_records(records, event["date"], event["filter"], event["folder"])
 
     def _filter_changed(self, value: str) -> None:
         self.media_filter = value
         self.refresh_gallery()
 
     def _page_changed(self, index: int) -> None:
-        self.date_navigation.setVisible(self.stack.widget(index) is self.gallery)
+        page = self.stack.widget(index)
+        self.date_navigation.setVisible(page is self.gallery)
+        self.toolbar.setVisible(page is not self.viewer)
+        if page is not self.viewer:
+            # However the viewer was left (Esc, a menu shortcut, a new folder), stop playback.
+            self.viewer.stop()
+
+    def _open_viewer(self, items: list[ViewerItem], index: int) -> None:
+        if not items:
+            return
+        current = self.stack.currentWidget()
+        if current is not self.viewer:
+            self._viewer_return = current
+        self.stack.setCurrentWidget(self.viewer)
+        self.viewer.show_items(items, index)
+
+    def _open_from_gallery(self, record: MediaRecord) -> None:
+        records = self.gallery.records
+        try:
+            index = records.index(record)
+        except ValueError:
+            records, index = [record], 0
+        self._open_viewer([ViewerItem.from_media(item) for item in records], index)
+
+    def _open_from_videos(self, rows: list[VideoRecord], index: int) -> None:
+        self._open_viewer([ViewerItem.from_video(row) for row in rows], index)
+
+    def _close_viewer(self) -> None:
+        # The page we came from was never rebuilt, so its scroll position is unchanged.
+        self.stack.setCurrentWidget(self._viewer_return or self.gallery)
+
+    def _trash_from_viewer(self, item: ViewerItem) -> None:
+        if self.delete_media(item):
+            self.viewer.remove_current()
+            if self._viewer_return is self.videos:
+                self._load_videos()
+        else:
+            # Cancelled or failed: the viewer stopped the video to release the file, so reload it.
+            self.viewer.go_to(self.viewer.index)
 
     def change_day(self, amount: int) -> None:
         self.current_date += timedelta(days=amount)
@@ -388,15 +480,16 @@ class MainWindow(QMainWindow):
         if not success:
             self._error("Unable to open file", "The file may have moved or you may not have permission to access it.\n\n" + (detail or ""))
 
-    def delete_media(self, record: MediaRecord) -> None:
+    def delete_media(self, record: MediaRecord | ViewerItem) -> bool:
+        """Ask, then move one item to Trash. Returns True if it was moved."""
         folder = self.root_folder
         if folder is None:
-            return
+            return False
         try:
             record.path.resolve().relative_to(folder.resolve())
         except (OSError, ValueError):
             self._error("Unable to move file", "This file is outside the selected media folder.")
-            return
+            return False
 
         kind = "video" if record.is_video else "photo"
         dialog = QMessageBox(self)
@@ -409,12 +502,12 @@ class MainWindow(QMainWindow):
         dialog.setDefaultButton(QMessageBox.StandardButton.Cancel)
         dialog.exec()
         if dialog.clickedButton() is not move_button:
-            return
+            return False
 
         cached_files = thumbnail_cache_files(record.path, record.file_size, record.modified_ns)
         if not QFile.moveToTrash(str(record.path)):
             self._error("Unable to move file", "The file could not be moved to Trash. Check that it still exists and that you have permission to change it.")
-            return
+            return False
         try:
             self.repository.remove(folder, record.path)
             for cached in cached_files:
@@ -426,6 +519,7 @@ class MainWindow(QMainWindow):
         self.status.setText(f"Moved {record.path.name} to Trash")
         self.refresh_gallery()
         self._load_insights()
+        return True
 
     def show_preferences(self) -> None:
         dialog = PreferencesDialog(self.settings.theme, self)
@@ -444,5 +538,7 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event: QCloseEvent) -> None:
         self.stop_event.set()
         self.analytics_pool.clear()
-        self.gallery.pool.clear()
+        self.gallery_pool.clear()
+        self.gallery.cancel_pending()
+        self.viewer.shutdown()
         event.accept()

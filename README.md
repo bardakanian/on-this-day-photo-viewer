@@ -113,6 +113,18 @@ On first launch, choose a folder containing photos and videos. The selected fold
 appearance preference, SQLite index, thumbnail cache, and application log are kept
 in the local app-data directory described below.
 
+### 5. Optional: add it to Applications (macOS)
+
+```bash
+python tools/make_launcher.py
+```
+
+This builds `On This Day.app` and installs it in `/Applications`, so you can start it
+from Launchpad, Spotlight or the Dock. Use `--user` to install in `~/Applications`
+instead. The launcher runs `app.py` with the project's `.venv`, so it always starts
+your latest code. Re-run the script if you move the project folder. App output goes
+to `~/.on_this_day_photo_viewer/launcher.log`.
+
 ## Using the app
 
 ### Browse the daily gallery
