@@ -48,6 +48,10 @@ class ImageCanvas(QWidget):
 
         `natural` is the photo's real size when the decoder knows it.
         """
+        if self._state is None:
+            # Nothing is on screen yet (e.g. "Loading…" was showing), so there is no zoom to keep.
+            self.set_content(pixmap, natural)
+            return
         self._message = ""
         size = self._pixmap_size(pixmap)
         if natural and (self._natural is None or self._natural_from_pixmap):
@@ -61,17 +65,22 @@ class ImageCanvas(QWidget):
         self.update()
 
     def set_message(self, text: str) -> None:
+        self._reset()
         self._message = text
-        self._pixmap = None
-        self._state = None
         self.update()
 
     def clear(self) -> None:
+        self._reset()
+        self.update()
+
+    def _reset(self) -> None:
+        # Forget everything about the previous photo, including its size: a size left over
+        # from it would make the next photo skip creating a zoom state and never be drawn.
         self._pixmap = None
         self._state = None
         self._natural = None
+        self._natural_from_pixmap = False
         self._message = ""
-        self.update()
 
     def _adopt_natural(self, size: tuple[int, int]) -> None:
         if self._state is None or self._natural is None or self._state.is_fitted:
