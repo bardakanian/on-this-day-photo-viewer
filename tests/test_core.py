@@ -206,6 +206,66 @@ class StorageTests(unittest.TestCase):
             MediaIndexer(media_root, stop, 1, events.append).run()
         self.assertEqual(events[-1]["type"], "scan_cancelled")
 
+    def indexed_count(self) -> int:
+        connection = database.open_database()
+        try:
+            return connection.execute("SELECT COUNT(*) FROM photos").fetchone()[0]
+        finally:
+            connection.close()
+
+    def test_unavailable_folder_keeps_the_index(self):
+        library = self.root / "external-drive"
+        library.mkdir()
+        Image.new("RGB", (8, 8)).save(library / "photo.jpg")
+        MediaIndexer(library, threading.Event(), 1, lambda event: None).run()
+        self.assertEqual(self.indexed_count(), 1)
+        # The drive is unplugged, then the user selects Rescan.
+        library.rename(self.root / "unplugged")
+        events = []
+        MediaIndexer(library, threading.Event(), 2, events.append).run()
+        self.assertEqual(events[-1]["type"], "scan_error")
+        self.assertEqual(self.indexed_count(), 1)
+
+    def test_folder_found_empty_keeps_the_index(self):
+        library = self.root / "mount-point"
+        library.mkdir()
+        photo = library / "photo.jpg"
+        Image.new("RGB", (8, 8)).save(photo)
+        MediaIndexer(library, threading.Event(), 1, lambda event: None).run()
+        photo.unlink()
+        events = []
+        MediaIndexer(library, threading.Event(), 2, events.append).run()
+        self.assertEqual(events[-1]["type"], "scan_complete")
+        self.assertEqual((events[-1]["deleted"], events[-1]["total_indexed"]), (0, 1))
+
+    def test_removed_files_are_dropped_from_the_index(self):
+        library = self.root / "library"
+        library.mkdir()
+        for name in ("kept.jpg", "removed.jpg"):
+            Image.new("RGB", (8, 8)).save(library / name)
+        MediaIndexer(library, threading.Event(), 1, lambda event: None).run()
+        (library / "removed.jpg").unlink()
+        events = []
+        MediaIndexer(library, threading.Event(), 2, events.append).run()
+        self.assertEqual((events[-1]["deleted"], events[-1]["total_indexed"]), (1, 1))
+
+    def test_scan_prunes_thumbnails_of_changed_and_removed_files(self):
+        library = self.root / "library"
+        library.mkdir()
+        photo = library / "photo.jpg"
+        Image.new("RGB", (64, 48), "orange").save(photo)
+        MediaIndexer(library, threading.Event(), 1, lambda event: None).run()
+        stat = photo.stat()
+        current = media.get_cached_thumbnail(photo.resolve(), "image", stat.st_size, stat.st_mtime_ns)
+        stale = media.thumbnail_cache_path(photo.resolve(), stat.st_size, stat.st_mtime_ns - 1)
+        stale.write_bytes(b"old preview")
+        failed = self.thumb_dir / "0123abcd.failed"
+        failed.touch()
+        MediaIndexer(library, threading.Event(), 2, lambda event: None).run()
+        self.assertTrue(current.exists())
+        self.assertFalse(stale.exists())
+        self.assertFalse(failed.exists())
+
     def test_unchanged_files_from_an_older_version_are_reread_once(self):
         library = self.root / "library"
         library.mkdir()

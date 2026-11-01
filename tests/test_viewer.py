@@ -99,10 +99,11 @@ class DisplayImageTests(unittest.TestCase):
 
 class ViewerItemTests(unittest.TestCase):
     def test_video_rows_without_dates_are_kept(self):
-        item = ViewerItem.from_video(VideoRecord(Path("/clip.mov"), None, 10, 20))
+        path = Path("/clip.mov")
+        item = ViewerItem.from_video(VideoRecord(path, None, 10, 20))
         self.assertIsNone(item.captured_at)
         self.assertTrue(item.is_video)
-        self.assertEqual(item.key, ("/clip.mov", 20))
+        self.assertEqual(item.key, (str(path), 20))  # "\clip.mov" on Windows
 
     def test_duration_format(self):
         self.assertEqual(media.format_duration(65_400), "1:05")
