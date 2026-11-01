@@ -7,7 +7,7 @@ from typing import Callable
 
 from .constants import BATCH_COMMIT_SIZE, SUPPORTED_EXTENSIONS, VIDEO_METADATA_VERSION
 from .database import open_database
-from .media import HEIC_ENABLED, get_capture_date, media_type_for_path
+from .media import HEIC_ENABLED, get_capture_date, media_type_for_path, prune_thumbnail_cache
 
 METADATA_WORKERS = min(8, os.cpu_count() or 4)
 
@@ -31,6 +31,11 @@ class MediaIndexer:
         # disk or subprocesses, so it runs on worker threads. SQLite writes stay on this thread.
         executor = ThreadPoolExecutor(max_workers=METADATA_WORKERS, thread_name_prefix="media-metadata")
         try:
+            # An unplugged drive or unmounted share looks like an empty folder, and scanning it
+            # would remove every record. Treat it as an error and leave the index alone.
+            if not self.folder.is_dir():
+                self.send("scan_error", message=f"Media folder is unavailable: {self.folder}")
+                return
             connection = open_database()
             cached = {
                 row[0]: (row[1], row[2], row[3], row[4])
@@ -117,8 +122,15 @@ class MediaIndexer:
                 drain(FIRST_COMPLETED)
             if pending:
                 connection.commit()
+            if not self.folder.is_dir():
+                # The folder went away mid-scan; what wasn't seen may still be there.
+                self.send("scan_error", message=f"Media folder became unavailable: {self.folder}")
+                return
             deleted = 0
-            for file_path in set(cached) - seen:
+            # Finding nothing at all where media used to be is far more likely an empty mount point
+            # than a library deleted outside the app, so keep the old records.
+            missing = set(cached) - seen if seen else set()
+            for file_path in missing:
                 if self.stop_event.is_set():
                     self.send("scan_cancelled")
                     return
@@ -129,6 +141,12 @@ class MediaIndexer:
             videos = connection.execute(
                 "SELECT COUNT(*) FROM photos WHERE folder_root=? AND media_type='video'", (self.folder_root,)
             ).fetchone()[0]
+            try:
+                # Thumbnails of edited, moved, or removed files are never shown again. Rows of every
+                # folder are kept, so switching back to another library doesn't regenerate its previews.
+                prune_thumbnail_cache(connection.execute("SELECT file_path, file_size, modified_ns FROM photos"))
+            except (OSError, sqlite3.Error):
+                pass
             self.send("scan_complete", scanned=scanned, updated=updated, unchanged=unchanged,
                       deleted=deleted, errors=errors, total_indexed=total, total_videos=videos)
         except Exception as exc:

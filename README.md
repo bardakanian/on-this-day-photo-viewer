@@ -60,7 +60,9 @@ Search and sort indexed videos without leaving the desktop app.
 3. The gallery queries that index for media captured on the selected month and day,
    then groups the results from newest to oldest year.
 4. Later scans reuse unchanged records, update changed files, and remove index
-   entries for files that are no longer present.
+   entries (and cached thumbnails) for files that are no longer present. If the
+   folder is unavailable, such as an unplugged drive, or contains no media at all,
+   the scan leaves the existing index untouched.
 
 The initial scan can take time for a large library. Subsequent scans are faster
 because unchanged files do not need to be analyzed again.

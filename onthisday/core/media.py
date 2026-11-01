@@ -4,7 +4,7 @@ import subprocess
 import sys
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Iterable
 
 from PIL import Image, ImageOps
 
@@ -202,6 +202,27 @@ def thumbnail_cache_files(path: Path, file_size: int, modified_ns: int) -> list[
     """Every cache file that may exist for one media item."""
     target = thumbnail_cache_path(path, file_size, modified_ns)
     return [target, _failure_marker(target), legacy_thumbnail_cache_path(path, file_size, modified_ns)]
+
+
+def prune_thumbnail_cache(items: Iterable[tuple[str, int, int]]) -> int:
+    """Delete cached thumbnails (and failure markers) not belonging to any (path, size, mtime) given.
+
+    Returns how many files were removed.
+    """
+    keep = {
+        cached.name
+        for file_path, file_size, modified_ns in items
+        for cached in thumbnail_cache_files(Path(file_path), file_size, modified_ns)
+    }
+    removed = 0
+    for entry in THUMBNAIL_DIR.iterdir():
+        if entry.suffix in {".jpg", ".failed"} and entry.name not in keep:
+            try:
+                entry.unlink()
+                removed += 1
+            except OSError:
+                pass
+    return removed
 
 
 def _image_thumbnail(source: Path, target: Path) -> None:
