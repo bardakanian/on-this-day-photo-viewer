@@ -10,7 +10,8 @@ Windows:
     python tools/make_launcher.py --desktop    # adds one to the Desktop as well
 
 The launcher contains no code of its own: it runs app.py with the project's .venv, so it
-always starts the latest code. Re-run this script if you move the project folder.
+always starts the latest code. Re-run this script if you move the project folder, or after
+a version bump so Finder's Get Info shows the new version.
 On macOS, output and errors from the app go to ~/.on_this_day_photo_viewer/launcher.log;
 on Windows the app runs without a console (pythonw) and logs to the same folder.
 """
@@ -28,7 +29,9 @@ from pathlib import Path
 from PIL import Image, ImageDraw, ImageFilter
 
 PROJECT = Path(__file__).resolve().parent.parent
-APP_NAME = "On This Day"
+sys.path.insert(0, str(PROJECT))
+from onthisday.core.constants import APP_NAME, VERSION  # noqa: E402
+
 BUNDLE_ID = "local.onthisday.launcher"
 EXECUTABLE = "launcher"
 ICON_SIZES = (16, 32, 64, 128, 256, 512, 1024)
@@ -158,8 +161,8 @@ def build(output_dir: Path) -> Path:
         "CFBundleIdentifier": BUNDLE_ID,
         "CFBundleExecutable": EXECUTABLE,
         "CFBundlePackageType": "APPL",
-        "CFBundleShortVersionString": "1.0",
-        "CFBundleVersion": "1",
+        "CFBundleShortVersionString": VERSION,
+        "CFBundleVersion": VERSION,
         "LSMinimumSystemVersion": "11.0",
         "NSHighResolutionCapable": True,
     }

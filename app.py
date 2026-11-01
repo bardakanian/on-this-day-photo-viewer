@@ -6,7 +6,7 @@ import sys
 from PySide6.QtCore import QCoreApplication, QLoggingCategory, Qt
 from PySide6.QtWidgets import QApplication, QMessageBox
 
-from onthisday.core.constants import APP_DIR
+from onthisday.core.constants import APP_DIR, APP_NAME, VERSION
 from onthisday.ui.main_window import MainWindow
 
 
@@ -34,11 +34,12 @@ def quiet_qt_logging() -> None:
 
 def main() -> int:
     quiet_qt_logging()
-    QCoreApplication.setOrganizationName("On This Day")
-    QCoreApplication.setApplicationName("On This Day")
+    QCoreApplication.setOrganizationName(APP_NAME)
+    QCoreApplication.setApplicationName(APP_NAME)
+    QCoreApplication.setApplicationVersion(VERSION)
     QApplication.setHighDpiScaleFactorRoundingPolicy(Qt.HighDpiScaleFactorRoundingPolicy.PassThrough)
     app = QApplication(sys.argv)
-    app.setApplicationDisplayName("On This Day")
+    app.setApplicationDisplayName(APP_NAME)
     app.setStyle("Fusion")
     configure_logging()
 
