@@ -43,3 +43,6 @@ screenshots/private/
 *.sqlite
 *.sqlite3
 
+
+# Local notes for Claude Code
+CLAUDE.md
