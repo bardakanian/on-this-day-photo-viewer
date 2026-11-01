@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
     QMessageBox, QProgressBar, QPushButton, QStackedWidget, QStyle, QVBoxLayout, QWidget,
 )
 
+from ..core.constants import APP_NAME, VERSION
 from ..core.database import MediaRepository
 from ..core.indexer import MediaIndexer
 from ..core.media import FFMPEG_ENABLED, HEIC_ENABLED, open_in_default_app, thumbnail_cache_files
@@ -107,7 +108,7 @@ class MainWindow(QMainWindow):
         self.gallery_pool.setMaxThreadCount(1)
         self.gallery_request_id = 0
 
-        self.setWindowTitle("On This Day")
+        self.setWindowTitle(f"{APP_NAME} {VERSION}")
         self.setMinimumSize(900, 620)
         self.resize(1240, 840)
         self._build_ui()

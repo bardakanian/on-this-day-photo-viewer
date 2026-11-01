@@ -315,8 +315,10 @@ In the viewer:
 
 ```text
 app.py                    Application entry point
+CHANGELOG.md              Version history (the version itself is VERSION in core/constants.py)
 onthisday/
 ├── core/
+│   ├── constants.py      App name, VERSION, paths, and file types
 │   ├── database.py       SQLite repository and Library Insights queries
 │   ├── indexer.py        Recursive, incremental, parallel media indexing
 │   ├── media.py          Metadata detection, thumbnails, and viewer image decoding
