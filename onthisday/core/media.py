@@ -2,6 +2,8 @@ import hashlib
 import os
 import subprocess
 import sys
+import threading
+import time
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Callable, Iterable
@@ -103,21 +105,35 @@ def parse_macos_metadata_date(path: Path) -> datetime | None:
     return choose_spotlight_date(_parse_spotlight_value(values[0]), _parse_spotlight_value(values[1]))
 
 
+_EXIF_IFD = 0x8769
+# (IFD, tag): when the photo was taken, when it was digitized, then when the file was last changed.
+_EXIF_DATE_TAGS = ((_EXIF_IFD, 36867), (_EXIF_IFD, 36868), (None, 306))
+
+
 def get_image_exif_date(path: Path) -> datetime | None:
+    """The first usable EXIF date. DateTimeOriginal and DateTimeDigitized live in the Exif
+    sub-IFD, not the main one, so they must be read from there; DateTime (306) is in the main
+    IFD but is rewritten by photo editors, so it is only a last resort."""
     try:
         with Image.open(path) as image:
             exif = image.getexif()
-            for tag in (36867, 36868, 306):
-                value = exif.get(tag) if exif else None
+            if not exif:
+                return None
+            sub_ifd = exif.get_ifd(_EXIF_IFD)
+            for ifd, tag in _EXIF_DATE_TAGS:
+                value = (sub_ifd if ifd == _EXIF_IFD else exif).get(tag)
                 if not value:
                     continue
                 if isinstance(value, bytes):
                     value = value.decode("utf-8", errors="ignore")
                 for date_format in ("%Y:%m:%d %H:%M:%S", "%Y-%m-%d %H:%M:%S"):
                     try:
-                        return datetime.strptime(str(value).strip(), date_format)
+                        parsed = datetime.strptime(str(value).strip().rstrip("\0"), date_format)
                     except ValueError:
                         continue
+                    if _usable(parsed):
+                        return parsed
+                    break  # a placeholder: try the next tag
     except (OSError, ValueError, TypeError):
         pass
     return None
@@ -149,9 +165,12 @@ def get_video_metadata_date(path: Path) -> datetime | None:
             ):
                 try:
                     parsed = parser(normalized)
-                    return parsed.astimezone().replace(tzinfo=None) if parsed.tzinfo else parsed
                 except ValueError:
                     continue
+                parsed = parsed.astimezone().replace(tzinfo=None) if parsed.tzinfo else parsed
+                if _usable(parsed):
+                    return parsed
+                break  # a placeholder (e.g. 1904 from an unset clock): try the next candidate
     except (OSError, subprocess.SubprocessError, ValueError):
         pass
     return None
@@ -198,6 +217,16 @@ def _failure_marker(target: Path) -> Path:
     return target.with_suffix(".failed")
 
 
+# Thumbnails are written to a ".part" file and renamed into place, so a half-written file
+# (the app quit mid-write, or two cards made the same thumbnail at once) is never served.
+_PARTIAL_SUFFIX = ".part"
+_STALE_PARTIAL_SECONDS = 3600
+
+
+def _partial_path(target: Path) -> Path:
+    return target.with_name(f"{target.stem}.{os.getpid()}-{threading.get_ident()}{_PARTIAL_SUFFIX}")
+
+
 def thumbnail_cache_files(path: Path, file_size: int, modified_ns: int) -> list[Path]:
     """Every cache file that may exist for one media item."""
     target = thumbnail_cache_path(path, file_size, modified_ns)
@@ -215,14 +244,24 @@ def prune_thumbnail_cache(items: Iterable[tuple[str, int, int]]) -> int:
         for cached in thumbnail_cache_files(Path(file_path), file_size, modified_ns)
     }
     removed = 0
+    stale_before = time.time() - _STALE_PARTIAL_SECONDS
     for entry in THUMBNAIL_DIR.iterdir():
-        if entry.suffix in {".jpg", ".failed"} and entry.name not in keep:
+        # Leftovers of interrupted writes; recent ones may still be in progress.
+        abandoned = entry.suffix == _PARTIAL_SUFFIX and _modified_before(entry, stale_before)
+        if abandoned or (entry.suffix in {".jpg", ".failed"} and entry.name not in keep):
             try:
                 entry.unlink()
                 removed += 1
             except OSError:
                 pass
     return removed
+
+
+def _modified_before(path: Path, moment: float) -> bool:
+    try:
+        return path.stat().st_mtime < moment
+    except OSError:
+        return False
 
 
 def _image_thumbnail(source: Path, target: Path) -> None:
@@ -241,27 +280,38 @@ def _image_thumbnail(source: Path, target: Path) -> None:
         image.thumbnail(THUMBNAIL_SIZE, Image.Resampling.LANCZOS)
         canvas = Image.new("RGB", THUMBNAIL_SIZE, THUMBNAIL_PADDING)
         canvas.paste(image, ((THUMBNAIL_SIZE[0] - image.width) // 2, (THUMBNAIL_SIZE[1] - image.height) // 2))
-        canvas.save(target, "JPEG", quality=87, optimize=True)
+        partial = _partial_path(target)
+        try:
+            canvas.save(partial, "JPEG", quality=87, optimize=True)
+            os.replace(partial, target)
+        finally:
+            partial.unlink(missing_ok=True)
 
 
 def _video_thumbnail(source: Path, target: Path) -> bool:
     # Prefer a frame one second in (skips black fade-ins); clips shorter than that
     # produce nothing, so fall back to the very first frame.
-    for seek in (["-ss", "1"], []):
-        try:
-            subprocess.run([
-                imageio_ffmpeg.get_ffmpeg_exe(), "-y", *seek, "-i", str(source),
-                "-frames:v", "1", "-vf",
-                f"scale={THUMBNAIL_SIZE[0]}:{THUMBNAIL_SIZE[1]}:force_original_aspect_ratio=decrease,"
-                f"pad={THUMBNAIL_SIZE[0]}:{THUMBNAIL_SIZE[1]}:(ow-iw)/2:(oh-ih)/2",
-                "-q:v", "3", str(target),
-            ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30, check=False,
-                creationflags=_NO_CONSOLE)
-        except (OSError, subprocess.SubprocessError):
-            continue
-        if target.exists() and target.stat().st_size > 0:
-            return True
-    return False
+    partial = _partial_path(target)
+    try:
+        for seek in (["-ss", "1"], []):
+            try:
+                subprocess.run([
+                    imageio_ffmpeg.get_ffmpeg_exe(), "-y", *seek, "-i", str(source),
+                    "-frames:v", "1", "-vf",
+                    f"scale={THUMBNAIL_SIZE[0]}:{THUMBNAIL_SIZE[1]}:force_original_aspect_ratio=decrease,"
+                    f"pad={THUMBNAIL_SIZE[0]}:{THUMBNAIL_SIZE[1]}:(ow-iw)/2:(oh-ih)/2",
+                    # The ".part" name has no image extension, so name the format and codec.
+                    "-q:v", "3", "-f", "image2", "-c:v", "mjpeg", str(partial),
+                ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30, check=False,
+                    creationflags=_NO_CONSOLE)
+            except (OSError, subprocess.SubprocessError):
+                continue
+            if partial.exists() and partial.stat().st_size > 0:
+                os.replace(partial, target)
+                return True
+        return False
+    finally:
+        partial.unlink(missing_ok=True)
 
 
 def get_cached_thumbnail(path: Path, media_type: str, file_size: int, modified_ns: int) -> Path | None:

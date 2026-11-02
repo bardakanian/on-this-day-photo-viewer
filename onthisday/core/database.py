@@ -1,3 +1,4 @@
+import calendar
 import sqlite3
 from datetime import date, datetime
 from pathlib import Path
@@ -58,12 +59,16 @@ class MediaRepository:
             connection.close()
 
     def matches_for_date(self, folder: Path, selected_date: date, media_filter: str) -> list[MediaRecord]:
-        sql = """
+        days = [selected_date.day]
+        if (selected_date.month, selected_date.day) == (2, 28) and not calendar.isleap(selected_date.year):
+            # There is no February 29 this year, so leap-day media shows up a day early instead.
+            days.append(29)
+        sql = f"""
             SELECT file_path, capture_ts, media_type, file_size, modified_ns
             FROM photos
-            WHERE folder_root = ? AND capture_month = ? AND capture_day = ?
+            WHERE folder_root = ? AND capture_month = ? AND capture_day IN ({", ".join("?" * len(days))})
         """
-        params: list[object] = [str(folder.resolve()), selected_date.month, selected_date.day]
+        params: list[object] = [str(folder.resolve()), selected_date.month, *days]
         if media_filter == "Photos":
             sql += " AND media_type = 'image'"
         elif media_filter == "Videos":

@@ -228,7 +228,8 @@ backups meet your recovery needs before using it.
 
 Each file's capture date comes from the first of these that exists:
 
-1. **Embedded metadata:** EXIF for images, and the creation time inside the video (read with FFmpeg).
+1. **Embedded metadata:** for images, the EXIF date taken (falling back to the digitized date, then the
+   last-modified date that editors rewrite); for videos, the creation time inside the file (read with FFmpeg).
 2. **A date macOS Spotlight found in the file's content** (macOS only). It's ignored when it equals the
    file's own creation time, because then it's just when the file was copied to this disk.
 3. **The earlier of the file's creation and modification times.** Copying a file to a
@@ -239,6 +240,11 @@ Each file's capture date comes from the first of these that exists:
 time zones; January 1, 1980; January 1, 1904; and dates in the future) are never treated
 as capture dates; the next source is used instead. After an update to these rules, the
 next scan re-reads every file once.
+
+Photos and videos taken on February 29 also show on February 28 in years without a leap day.
+
+Hidden and system files aren't indexed: names starting with `.` (such as macOS `._` files on
+external drives, and `.Trashes`), Synology `@eaDir`, and Windows `$RECYCLE.BIN`.
 
 Because metadata can be missing or incorrect, review detected dates before relying
 on the index for organizational decisions.

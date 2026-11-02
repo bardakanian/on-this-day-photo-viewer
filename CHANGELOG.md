@@ -2,6 +2,16 @@
 
 With every change, bump `VERSION` in `onthisday/core/constants.py` and add an entry here.
 
+## 1.5.1 — 2026-11-01
+
+- Photos are dated by when they were taken (EXIF DateTimeOriginal). Before, that tag was never found, so edited photos got their edit date. The next scan re-reads every date once.
+- A date that is a placeholder (1904, 1970, 1980) no longer stops the search; the next date in the photo or video is tried.
+- Thumbnails are written to a temporary file and renamed into place, so a half-written one is never shown or kept.
+- Hidden and system files are no longer indexed: macOS "._" files on external and network drives, `.Trashes`, Synology `@eaDir`, and Windows `$RECYCLE.BIN`.
+- February 29 photos and videos show on February 28 in years without a leap day.
+- After a delete, the gallery keeps the years you expanded with "Load more" or collapsed, and no longer jumps later.
+- The Video Library count respects an active search after Refresh.
+
 ## 1.5.0 — 2026-11-01
 
 - Show the version number in the window title ("On This Day 1.5.0") and in the macOS launcher's Get Info.

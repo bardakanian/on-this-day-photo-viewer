@@ -121,16 +121,22 @@ class VideosPage(QWidget):
 
     def set_records(self, rows: list[VideoRecord]) -> None:
         self.model.replace(rows)
-        self.count.setText(f"{len(rows):,} indexed {'video' if len(rows) == 1 else 'videos'}")
         self.results.setCurrentWidget(self.table if rows else self.empty)
-        if not rows:
-            self.count.setText("No indexed videos")
+        self._update_count()
 
     def _filter(self, text: str) -> None:
         self.proxy.setFilterFixedString(text)
-        shown = self.proxy.rowCount()
+        self._update_count()
+
+    def _update_count(self) -> None:
+        # Counts what the table shows, so a search that is still active after Refresh is respected.
         total = self.model.rowCount()
-        self.count.setText(f"{shown:,} of {total:,} videos" if text else f"{total:,} indexed videos")
+        if not total:
+            self.count.setText("No indexed videos")
+        elif self.search.text():
+            self.count.setText(f"{self.proxy.rowCount():,} of {total:,} videos")
+        else:
+            self.count.setText(f"{total:,} indexed {'video' if total == 1 else 'videos'}")
 
     def _open_index(self, index: QModelIndex) -> None:
         rows = [self.model.rows[self.proxy.mapToSource(self.proxy.index(row, 0)).row()]
