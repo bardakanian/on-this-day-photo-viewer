@@ -196,10 +196,25 @@ def get_filesystem_date(path: Path) -> datetime | None:
     return min(valid or candidates, default=None)
 
 
-def get_capture_date(path: Path, media_type: str) -> datetime | None:
+# Where a capture date came from, as returned by capture_date_with_source.
+DATE_EMBEDDED, DATE_SPOTLIGHT, DATE_FILE = "embedded", "spotlight", "file"
+
+
+def capture_date_with_source(path: Path, media_type: str) -> tuple[datetime | None, str | None]:
+    """The capture date and which of DATE_EMBEDDED, DATE_SPOTLIGHT or DATE_FILE it came from."""
     # Embedded date first, then a date Spotlight found in the content, then the file's own times.
     embedded = get_image_exif_date(path) if media_type == "image" else get_video_metadata_date(path)
-    return _usable(embedded) or _usable(parse_macos_metadata_date(path)) or get_filesystem_date(path)
+    if _usable(embedded):
+        return embedded, DATE_EMBEDDED
+    spotlight = _usable(parse_macos_metadata_date(path))
+    if spotlight:
+        return spotlight, DATE_SPOTLIGHT
+    filesystem = get_filesystem_date(path)
+    return filesystem, DATE_FILE if filesystem else None
+
+
+def get_capture_date(path: Path, media_type: str) -> datetime | None:
+    return capture_date_with_source(path, media_type)[0]
 
 
 def thumbnail_cache_path(

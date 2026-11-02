@@ -53,7 +53,9 @@ class LoadingMessageTests(unittest.TestCase):
         self.assertFalse(canvas.has_image)
 
 
-class ViewerJumpTests(unittest.TestCase):
+class ViewerTestCase(unittest.TestCase):
+    """Three photos on disk for a viewer to show."""
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         root = Path(self.temp.name)
@@ -72,6 +74,8 @@ class ViewerJumpTests(unittest.TestCase):
             time.sleep(0.01)
         self.assertTrue(condition(), "timed out")
 
+
+class ViewerJumpTests(ViewerTestCase):
     def test_jumping_to_a_photo_that_was_not_prefetched_shows_it(self):
         # No gallery thumbnail (not cached yet, or too dark to crop), so "Loading…" stays up.
         with patch.object(viewer_images, "load_placeholder", return_value=None):
@@ -87,6 +91,27 @@ class ViewerJumpTests(unittest.TestCase):
             self.assertIsNotNone(canvas._state, "black screen: photo decoded but has nowhere to be drawn")
             self.assertEqual(canvas._natural, (2000, 3000))
             viewer.shutdown()
+
+
+class InfoPanelTests(ViewerTestCase):
+    def test_info_panel_follows_the_current_item(self):
+        viewer = ViewerPage()
+        viewer.resize(1200, 700)
+        with patch.object(viewer.metadata, "request", wraps=viewer.metadata.request) as request:
+            viewer.show_items(self.items, 0)
+            request.assert_not_called()  # nothing is read while the panel is closed
+        viewer.info_button.toggle()  # same as pressing I
+        self.assertFalse(viewer.info_panel.isHidden())
+        rows = lambda: dict(viewer.info_panel.rows)
+        self.wait_until(lambda: rows().get("Dimensions", "").startswith("4,032 × 3,024"))
+        self.assertEqual(rows()["Path"], str(self.items[0].path))
+        viewer.step(1)
+        self.wait_until(lambda: rows().get("Dimensions", "").startswith("3,000 × 2,000"))
+        viewer.step(-1)  # cached: shown straight away
+        self.assertTrue(rows()["Dimensions"].startswith("4,032 × 3,024"))
+        viewer.info_button.toggle()
+        self.assertTrue(viewer.info_panel.isHidden())
+        viewer.shutdown()
 
 
 if __name__ == "__main__":

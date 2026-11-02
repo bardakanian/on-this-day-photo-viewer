@@ -2,6 +2,10 @@
 
 With every change, bump `VERSION` in `onthisday/core/constants.py` and add an entry here.
 
+## 1.6.0 — 2026-11-01
+
+- Info panel in the viewer: select **Info** or press **I** to see the capture date and where it came from, dimensions, type, file size and path. Videos also show duration, frame rate and codec.
+
 ## 1.5.1 — 2026-11-01
 
 - Photos are dated by when they were taken (EXIF DateTimeOriginal). Before, that tag was never found, so edited photos got their edit date. The next scan re-reads every date once.

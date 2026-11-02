@@ -166,7 +166,7 @@ a row, or right-click it and choose **Open Video**, to play it in the viewer.
 
 Opening an item shows it full-window, with the main toolbar hidden. The top bar shows
 the filename and capture date, your position in the list (for example **3 of 12**),
-and buttons for **Open in Default App** and **Move to Trash**.
+and buttons for **Info**, **Open in Default App** and **Move to Trash**.
 
 - **Moving between items:** use **←** and **→** (or the arrow buttons), and **Home**
   or **End** for the first or last item. From the gallery, this steps through every
@@ -175,6 +175,12 @@ and buttons for **Open in Default App** and **Move to Trash**.
   search results.
 - **Going back:** press **Esc** or select **‹ Back**. You return to the page you came
   from, at the same scroll position.
+
+- **Details:** select **Info** or press **I** to open a side panel with the capture date
+  and where it came from (photo or video metadata, Spotlight, or the file's own dates),
+  dimensions, type, file size and full path. Videos also show their duration, frame rate
+  and codec. The panel stays open as you step through items; details are read only
+  while it is open.
 
 **Photos** open with their EXIF rotation applied, fitted to the window. The gallery
 thumbnail appears at once, and a screen-sized version replaces it a moment later.
@@ -313,6 +319,7 @@ In the viewer:
 | Play or pause a video (closes a photo) | `Space` |
 | Skip back / forward 5 seconds | `⇧←` / `⇧→` |
 | Mute | `M` |
+| Show or hide Info | `I` |
 | Zoom in / out | `⌘=` / `⌘−` |
 | Fit or actual size | `⌘0` |
 | Move to Trash | `⌘⌫` |
@@ -328,6 +335,7 @@ onthisday/
 │   ├── database.py       SQLite repository and Library Insights queries
 │   ├── indexer.py        Recursive, incremental, parallel media indexing
 │   ├── media.py          Metadata detection, thumbnails, and viewer image decoding
+│   ├── metadata.py       Details for the viewer's Info panel (dimensions, video codec, …)
 │   ├── models.py         Shared immutable data models
 │   ├── settings.py       Local configuration persistence
 │   ├── workqueue.py      Background job queue for the viewer
@@ -336,7 +344,8 @@ onthisday/
     ├── pages/            Gallery, Video Library, Library Insights, and the viewer
     ├── theme/            Color palettes, typography, metrics, and stylesheets
     ├── viewer_images.py  Background photo decoding with neighbour prefetch
-    └── widgets/          Media cards, photo canvas, video player, and shared controls
+    ├── viewer_metadata.py Background reading of Info panel details
+    └── widgets/          Media cards, photo canvas, video player, Info panel, and shared controls
 tools/make_launcher.py    macOS app / Windows Start-menu shortcut builder
 tests/                    Storage, indexing, date, viewer, and Windows tests
 assets/screenshots/       Sanitized documentation screenshots

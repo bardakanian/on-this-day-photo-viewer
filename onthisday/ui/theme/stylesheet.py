@@ -67,6 +67,12 @@ def build_stylesheet(c: Palette) -> str:
     QFrame[role="viewerBar"] QPushButton:checked {{ background: rgba(255,255,255,0.24); }}
     QFrame[role="viewerBar"] QPushButton:disabled {{ color: rgba(236,238,242,0.35); background: transparent; border-color: rgba(255,255,255,0.08); }}
     QFrame[role="viewerBar"] QPushButton[variant="danger"] {{ color: #EE7180; background: transparent; border-color: #EE7180; }}
+    QFrame[role="viewerPanel"] {{ background: rgba(18, 20, 24, 0.94); border: none; border-left: 1px solid rgba(255,255,255,0.10); }}
+    QFrame[role="viewerPanel"] QScrollArea, QFrame[role="viewerPanel"] QScrollArea > QWidget > QWidget {{ background: transparent; }}
+    QFrame[role="viewerPanel"] QLabel {{ color: #ECEEF2; }}
+    QFrame[role="viewerPanel"] QLabel[muted="true"] {{ color: #A6ADBA; }}
+    QFrame[role="viewerPanel"] QLabel[role="panelTitle"] {{ font-size: {Typography.SECTION}px; font-weight: 600; }}
+    QFrame[role="viewerPanel"] QLabel[role="panelCaption"] {{ color: #A6ADBA; font-size: {Typography.CAPTION}px; font-weight: 600; }}
     QFrame[role="viewerBar"] QSlider::groove:horizontal {{ background: rgba(255,255,255,0.25); height: 4px; border-radius: 2px; }}
     QFrame[role="viewerBar"] QSlider::sub-page:horizontal {{ background: {c.accent}; border-radius: 2px; }}
     QFrame[role="viewerBar"] QSlider::handle:horizontal {{ background: #ECEEF2; width: 12px; margin: -4px 0; border-radius: 6px; }}
