@@ -2,9 +2,12 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QKeySequence, QPixmap, QShortcut
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QStackedWidget, QVBoxLayout, QWidget
 
+from ...core.metadata import MediaMetadata, metadata_rows
 from ...core.models import ViewerItem
 from ..viewer_images import PLACEHOLDER, ViewerImageLoader
+from ..viewer_metadata import ViewerMetadataLoader
 from ..widgets.image_canvas import ImageCanvas
+from ..widgets.info_panel import InfoPanel
 from ..widgets.video_player import VideoPlayer
 
 
@@ -26,6 +29,8 @@ class ViewerPage(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground)
         self.images = ViewerImageLoader(self)
         self.images.loaded.connect(self._image_loaded)
+        self.metadata = ViewerMetadataLoader(self)
+        self.metadata.loaded.connect(self._metadata_loaded)
         self.items: list[ViewerItem] = []
         self.index = 0
         self._full_requested = False
@@ -76,6 +81,10 @@ class ViewerPage(QWidget):
         self.position_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         bar.addWidget(self.position_label)
         bar.addSpacing(8)
+        self.info_button = self._button("Info", "Show or hide details (I)")
+        self.info_button.setCheckable(True)
+        self.info_button.toggled.connect(self._set_info_visible)
+        bar.addWidget(self.info_button)
         open_button = self._button("Open in Default App", "Open in the default app")
         open_button.clicked.connect(self._open_externally)
         bar.addWidget(open_button)
@@ -93,7 +102,14 @@ class ViewerPage(QWidget):
         self.video.open_externally_requested.connect(self._open_externally)
         self.content.addWidget(self.canvas)
         self.content.addWidget(self.video)
-        layout.addWidget(self.content, 1)
+        self.info_panel = InfoPanel()
+        self.info_panel.hide()
+        body = QHBoxLayout()
+        body.setContentsMargins(0, 0, 0, 0)
+        body.setSpacing(0)
+        body.addWidget(self.content, 1)
+        body.addWidget(self.info_panel)
+        layout.addLayout(body, 1)
 
         def shortcut(keys, slot):
             item = QShortcut(QKeySequence(keys), self)
@@ -114,6 +130,7 @@ class ViewerPage(QWidget):
         shortcut("Ctrl+-", self.canvas.zoom_out)
         shortcut("Ctrl+0", self.canvas.toggle_actual_size)
         shortcut("Ctrl+Backspace", self._trash_current)
+        shortcut("I", self.info_button.toggle)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
 
     @staticmethod
@@ -169,6 +186,7 @@ class ViewerPage(QWidget):
     def shutdown(self) -> None:
         self.video.stop()
         self.images.shutdown()
+        self.metadata.shutdown()
 
     # Showing items -----------------------------------------------------------
 
@@ -206,6 +224,7 @@ class ViewerPage(QWidget):
             self.content.setCurrentWidget(self.canvas)
             self._show_photo(item)
         self._prefetch_neighbours()
+        self._update_info()
 
     def _show_photo(self, item: ViewerItem) -> None:
         edge = self._display_edge()
@@ -255,6 +274,28 @@ class ViewerPage(QWidget):
         if kind is not None:
             self._screen_decoded = True
         self.canvas.set_pixmap(QPixmap.fromImage(image), natural)
+
+    # Info panel --------------------------------------------------------------
+
+    def _set_info_visible(self, visible: bool) -> None:
+        self.info_panel.setVisible(visible)
+        self._update_info()
+
+    def _update_info(self) -> None:
+        item = self.current_item
+        if item is None or self.info_panel.isHidden():
+            return  # details are only read while the panel is open
+        cached = self.metadata.cached(item)
+        if cached is not None:
+            self.info_panel.show_rows(metadata_rows(cached))
+        else:
+            self.info_panel.show_message("Loading…")
+            self.metadata.request(item)
+
+    def _metadata_loaded(self, key, metadata: MediaMetadata) -> None:
+        current = self.current_item
+        if current is not None and current.key == key and not self.info_panel.isHidden():
+            self.info_panel.show_rows(metadata_rows(metadata))
 
     def _request_full_resolution(self) -> None:
         item = self.current_item
