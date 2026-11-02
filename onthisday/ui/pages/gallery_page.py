@@ -17,9 +17,10 @@ from ..widgets.media_card import MediaCard
 class YearSection(QWidget):
     open_requested = Signal(object)
     delete_requested = Signal(object)
+    more_requested = Signal()
 
     def __init__(self, year: int, records: list[MediaRecord], root_folder: Path, pool: QThreadPool,
-                 read_pool: QThreadPool, parent=None):
+                 read_pool: QThreadPool, rendered: int = INITIAL_YEAR_BATCH, expanded: bool = True, parent=None):
         super().__init__(parent)
         self.year, self.records, self.root_folder, self.pool = year, records, root_folder, pool
         self.read_pool = read_pool
@@ -43,12 +44,20 @@ class YearSection(QWidget):
         layout.addWidget(self.body)
         self.more = QPushButton()
         self.more.setProperty("variant", "ghost")
+        self.more.clicked.connect(self.more_requested)
         self.more.clicked.connect(lambda: self.render_more(INITIAL_YEAR_BATCH))
         layout.addWidget(self.more, alignment=Qt.AlignmentFlag.AlignLeft)
-        self.render_more(INITIAL_YEAR_BATCH)
+        self.render_more(max(INITIAL_YEAR_BATCH, rendered))
+        if not expanded:
+            self._toggle()
+
+    @property
+    def expanded(self) -> bool:
+        return not self.body.isHidden()
 
     def _toggle(self) -> None:
-        visible = not self.body.isVisible()
+        # isHidden, not isVisible: a section that isn't on screen yet still counts as expanded.
+        visible = self.body.isHidden()
         self.body.setVisible(visible)
         self.more.setVisible(visible and self.rendered < len(self.records))
         self.toggle.setText(f"{'▾' if visible else '›'}  {self.year}")
@@ -102,11 +111,16 @@ class GalleryPage(QWidget):
         self._shown_key: tuple | None = None
         self._pending_scroll: int | None = None
         self.scroll.verticalScrollBar().rangeChanged.connect(self._apply_pending_scroll)
+        # Once the user scrolls or loads more, an old position must not be restored any more.
+        self.scroll.verticalScrollBar().actionTriggered.connect(self._forget_pending_scroll)
 
     def cancel_pending(self) -> None:
         """Drop queued thumbnail jobs for cards about to be destroyed; running ones just finish."""
         self.pool.clear()
         self.read_pool.clear()
+
+    def _forget_pending_scroll(self, *_args) -> None:
+        self._pending_scroll = None
 
     def _apply_pending_scroll(self, _minimum: int, maximum: int) -> None:
         if self._pending_scroll is not None and maximum >= self._pending_scroll:
@@ -122,6 +136,12 @@ class GalleryPage(QWidget):
         self._pending_scroll = self.scroll.verticalScrollBar().value() if same_view else None
         if not same_view:
             self.scroll.verticalScrollBar().setValue(0)
+        # Keep each year as it was (cards loaded with "Load more", collapsed or not), so the page
+        # is as tall as before and the scroll position can be restored.
+        previous = {
+            section.year: (section.rendered, section.expanded)
+            for section in self.content.findChildren(YearSection)
+        } if same_view else {}
         self.records = []
         while self.content_layout.count():
             item = self.content_layout.takeAt(0)
@@ -152,7 +172,9 @@ class GalleryPage(QWidget):
             grouped[record.captured_at.year].append(record)
         for year in sorted(grouped, reverse=True):
             self.records.extend(grouped[year])
-            section = YearSection(year, grouped[year], folder, self.pool, self.read_pool)
+            rendered, expanded = previous.get(year, (INITIAL_YEAR_BATCH, True))
+            section = YearSection(year, grouped[year], folder, self.pool, self.read_pool, rendered, expanded)
+            section.more_requested.connect(self._forget_pending_scroll)
             section.open_requested.connect(self.open_requested)
             section.delete_requested.connect(self.delete_requested)
             self.content_layout.addWidget(section)

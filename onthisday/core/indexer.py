@@ -3,13 +3,25 @@ import sqlite3
 import threading
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Iterator
 
 from .constants import BATCH_COMMIT_SIZE, SUPPORTED_EXTENSIONS, VIDEO_METADATA_VERSION
 from .database import open_database
 from .media import HEIC_ENABLED, get_capture_date, media_type_for_path, prune_thumbnail_cache
 
 METADATA_WORKERS = min(8, os.cpu_count() or 4)
+# System folders that hold copies, caches, or deleted files rather than the user's own media.
+# Names starting with "." (.Trashes, .Spotlight-V100, AppleDouble "._" files) are skipped too.
+SKIPPED_FOLDERS = {"@eaDir", "#recycle", "#snapshot", "$RECYCLE.BIN", "System Volume Information"}
+
+
+def media_candidates(folder: Path) -> Iterator[Path]:
+    """Every file under `folder`, without descending into hidden or system folders."""
+    for root, folders, files in os.walk(folder):
+        folders[:] = [name for name in folders if not name.startswith(".") and name not in SKIPPED_FOLDERS]
+        for name in files:
+            if not name.startswith("."):
+                yield Path(root, name)
 
 
 class MediaIndexer:
@@ -86,7 +98,7 @@ class MediaIndexer:
                     store(future)
 
             self.send("scan_started")
-            for path in self.folder.rglob("*"):
+            for path in media_candidates(self.folder):
                 if self.stop_event.is_set():
                     self.send("scan_cancelled")
                     return
