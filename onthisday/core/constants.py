@@ -25,6 +25,7 @@ BATCH_COMMIT_SIZE = 250
 # Bump to make the next scan re-read every file's capture date. Despite the name (kept for
 # database compatibility) it applies to photos and videos since version 6, which stopped
 # dating metadata-less files by when they were copied; 7 ignores epoch and unset-clock dates;
-# 8 reads EXIF DateTimeOriginal, which earlier versions missed.
-VIDEO_METADATA_VERSION = 8
+# 8 reads EXIF DateTimeOriginal, which earlier versions missed; 9 keeps a video's QuickTime
+# local creation time instead of converting its UTC time with this computer's time zone.
+VIDEO_METADATA_VERSION = 9
 INITIAL_YEAR_BATCH = 60

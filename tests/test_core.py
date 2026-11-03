@@ -4,6 +4,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 import unittest
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -477,6 +478,42 @@ class PlaceholderDateTests(unittest.TestCase):
             os.utime(path, (made.timestamp(), made.timestamp()))
             with patch.object(media, "parse_macos_metadata_date", return_value=None):
                 self.assertEqual(media.get_capture_date(path, "image"), made)
+
+
+@unittest.skipUnless(hasattr(time, "tzset"), "changing the time zone needs time.tzset (not on Windows)")
+class VideoTimeZoneTests(unittest.TestCase):
+    IPHONE = """\
+  Metadata:
+    creation_time   : 2024-11-02T05:30:12.000000Z
+    com.apple.quicktime.creationdate: 2024-11-01T22:30:12-0700
+  Stream #0:0[0x1](und): Video: hevc (Main), yuv420p, 1920x1080
+      Metadata:
+        creation_time   : 2024-11-02T05:30:12.000000Z
+"""
+
+    def test_quicktime_local_time_is_kept_wherever_this_computer_is(self):
+        # Recorded at 22:30 on November 1 in California; 05:30 the next day in UTC.
+        for zone in ("America/Los_Angeles", "Asia/Tokyo", "UTC"):
+            with self.subTest(zone=zone), patch.dict(os.environ, {"TZ": zone}):
+                time.tzset()
+                self.assertEqual(media.parse_video_date(self.IPHONE), datetime(2024, 11, 1, 22, 30, 12))
+        time.tzset()
+
+    def test_utc_creation_time_is_converted_when_it_is_all_there_is(self):
+        output = "    creation_time   : 2024-11-02T05:30:12.000000Z\n"
+        with patch.dict(os.environ, {"TZ": "America/Los_Angeles"}):
+            time.tzset()
+            self.assertEqual(media.parse_video_date(output), datetime(2024, 11, 1, 22, 30, 12))
+        time.tzset()
+
+    def test_placeholder_falls_through_to_the_next_date(self):
+        output = ("    com.apple.quicktime.creationdate: 1904-01-01T00:00:00+0000\n"
+                  "    creation_time   : 2019-06-01T12:00:00.000000Z\n")
+        with patch.dict(os.environ, {"TZ": "UTC"}):
+            time.tzset()
+            self.assertEqual(media.parse_video_date(output), datetime(2019, 6, 1, 12))
+        time.tzset()
+
 
 if __name__ == "__main__":
     unittest.main()

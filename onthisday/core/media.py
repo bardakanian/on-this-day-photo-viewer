@@ -139,6 +139,55 @@ def get_image_exif_date(path: Path) -> datetime | None:
     return None
 
 
+# QuickTime's creation date (iPhone, many cameras) is the local time where the video was made,
+# with its UTC offset: "2024-11-01T22:30:12-0700". It's kept as that wall-clock time, like EXIF
+# dates are. creation_time is UTC, so it can only be converted with this computer's time zone,
+# which puts a video recorded while travelling on the wrong day.
+_LOCAL_DATE_KEYS = {"com.apple.quicktime.creationdate"}
+_OTHER_DATE_KEYS = {"date", "date-eng", "creation date"}
+
+
+def parse_video_date(probe_output: str) -> datetime | None:
+    """The best capture date in `ffmpeg -i` output, or None."""
+    local, utc, other = [], [], []
+    for line in probe_output.splitlines():
+        key, separator, value = line.strip().partition(":")
+        if not separator:
+            continue
+        key, value = key.strip().lower(), value.strip()
+        if key in _LOCAL_DATE_KEYS:
+            local.append(value)
+        elif key == "creation_time":
+            utc.append(value)
+        elif key in _OTHER_DATE_KEYS:
+            other.append(value)
+    for values, keep_wall_time in ((local, True), (utc, False), (other, False)):
+        for value in filter(None, values):
+            parsed = _parse_video_timestamp(value)
+            if parsed is None:
+                continue
+            if parsed.tzinfo:
+                parsed = parsed.replace(tzinfo=None) if keep_wall_time else parsed.astimezone().replace(tzinfo=None)
+            if _usable(parsed):
+                return parsed
+            # A placeholder (e.g. 1904 from an unset clock): try the next candidate.
+    return None
+
+
+def _parse_video_timestamp(value: str) -> datetime | None:
+    normalized = value.replace("Z", "+00:00")
+    for parser in (
+        datetime.fromisoformat,
+        lambda item: datetime.strptime(item, "%Y-%m-%d %H:%M:%S"),
+        lambda item: datetime.strptime(item, "%Y/%m/%d %H:%M:%S"),
+    ):
+        try:
+            return parser(normalized)
+        except ValueError:
+            continue
+    return None
+
+
 def get_video_metadata_date(path: Path) -> datetime | None:
     if not FFMPEG_ENABLED:
         return None
@@ -147,33 +196,9 @@ def get_video_metadata_date(path: Path) -> datetime | None:
             [imageio_ffmpeg.get_ffmpeg_exe(), "-hide_banner", "-i", str(path)],
             capture_output=True, text=True, timeout=10, check=False, creationflags=_NO_CONSOLE,
         )
-        candidates = []
-        for line in result.stderr.splitlines():
-            stripped = line.strip()
-            if "creation_time" in stripped:
-                candidates.append(stripped.partition(":")[2].strip())
-            elif "date" in stripped.lower() and ":" in stripped:
-                key, _, value = stripped.partition(":")
-                if key.strip().lower() in {"date", "date-eng", "creation date"}:
-                    candidates.append(value.strip())
-        for value in filter(None, candidates):
-            normalized = value.replace("Z", "+00:00")
-            for parser in (
-                datetime.fromisoformat,
-                lambda item: datetime.strptime(item, "%Y-%m-%d %H:%M:%S"),
-                lambda item: datetime.strptime(item, "%Y/%m/%d %H:%M:%S"),
-            ):
-                try:
-                    parsed = parser(normalized)
-                except ValueError:
-                    continue
-                parsed = parsed.astimezone().replace(tzinfo=None) if parsed.tzinfo else parsed
-                if _usable(parsed):
-                    return parsed
-                break  # a placeholder (e.g. 1904 from an unset clock): try the next candidate
-    except (OSError, subprocess.SubprocessError, ValueError):
-        pass
-    return None
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return parse_video_date(result.stderr)
 
 
 def get_filesystem_date(path: Path) -> datetime | None:
