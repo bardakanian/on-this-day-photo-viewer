@@ -74,7 +74,10 @@ class GalleryLoadTask(QRunnable):
         event = {"request_id": self.request_id, "folder": self.folder,
                  "date": self.selected_date, "filter": self.media_filter}
         try:
-            event["records"] = self.repository.matches_for_date(self.folder, self.selected_date, self.media_filter)
+            if not self.folder.is_dir():
+                event["unavailable"] = True  # e.g. an external drive that isn't connected
+            else:
+                event["records"] = self.repository.matches_for_date(self.folder, self.selected_date, self.media_filter)
         except Exception as exc:
             event["error"] = exc
         try:
@@ -99,6 +102,7 @@ class MainWindow(QMainWindow):
         # Scans started by the app itself (at launch, on return) stay quiet about an unplugged drive.
         self.scan_is_automatic = False
         self.last_scan_finished: float | None = None
+        self.library_unavailable = False
         self.index_events = IndexEvents()
         self.index_events.received.connect(self._handle_index_event)
         self.analytics_events = AnalyticsEvents()
@@ -193,6 +197,7 @@ class MainWindow(QMainWindow):
         self.gallery.choose_folder_requested.connect(self.choose_folder)
         self.gallery.open_requested.connect(self._open_from_gallery)
         self.gallery.delete_requested.connect(self.delete_media)
+        self.gallery.set_theme_colors(self.theme.colors)
         self.videos = VideosPage()
         self.videos.back_requested.connect(lambda: self.stack.setCurrentWidget(self.gallery))
         self.videos.refresh_requested.connect(self._load_videos)
@@ -202,7 +207,7 @@ class MainWindow(QMainWindow):
         self.insights.choose_folder_requested.connect(self.choose_folder)
         self.insights.rescan_requested.connect(self.start_indexing)
         self.insights.retry_requested.connect(self._load_insights)
-        self.theme.changed.connect(lambda _preference: self.insights.set_theme_colors(self.theme.colors))
+        self.theme.changed.connect(self._theme_changed)
         self.stack.addWidget(self.gallery)
         self.stack.addWidget(self.videos)
         self.stack.addWidget(self.insights)
@@ -347,7 +352,7 @@ class MainWindow(QMainWindow):
                 self.status.setText(
                     f"Library ready  ·  {event['total_indexed']:,} items  ·  {event['updated']:,} updated  ·  {event['deleted']:,} removed"
                 )
-                if event["updated"] or event["deleted"]:
+                if event["updated"] or event["deleted"] or self.library_unavailable:
                     # Rebuilding unchanged pages would only flicker and reload thumbnails.
                     self.refresh_gallery()
                     if self.stack.currentWidget() is self.videos:
@@ -379,6 +384,10 @@ class MainWindow(QMainWindow):
     def _handle_gallery_event(self, event: dict) -> None:
         if event.get("request_id") != self.gallery_request_id or event.get("folder") != self.root_folder:
             return
+        self.library_unavailable = bool(event.get("unavailable"))
+        if self.library_unavailable:
+            self.gallery.show_unavailable(event["folder"])
+            return
         records = event.get("records", [])
         if "error" in event:
             LOGGER.error("Could not query gallery records: %s", event["error"])
@@ -388,6 +397,10 @@ class MainWindow(QMainWindow):
     def _filter_changed(self, value: str) -> None:
         self.media_filter = value
         self.refresh_gallery()
+
+    def _theme_changed(self, _preference: str) -> None:
+        self.insights.set_theme_colors(self.theme.colors)
+        self.gallery.set_theme_colors(self.theme.colors)
 
     def _page_changed(self, index: int) -> None:
         page = self.stack.widget(index)
@@ -559,14 +572,17 @@ class MainWindow(QMainWindow):
 
     def rescan_if_stale(self) -> None:
         """Re-check the library when returning to the app, at most every AUTO_RESCAN_SECONDS."""
-        if self.last_scan_finished is None or time.monotonic() - self.last_scan_finished < AUTO_RESCAN_SECONDS:
-            return  # the launch scan is still running, or the last one was recent
-        self.start_indexing(automatic=True)
+        if self.last_scan_finished is None:
+            return  # the launch scan is still running
+        # While the library is unavailable, every return checks whether its drive is back. The check
+        # runs on the scan's thread, since a disconnected network share can take a while to answer.
+        if self.library_unavailable or time.monotonic() - self.last_scan_finished >= AUTO_RESCAN_SECONDS:
+            self.start_indexing(automatic=True)
 
     def closeEvent(self, event: QCloseEvent) -> None:
         self.stop_event.set()
         self.analytics_pool.clear()
         self.gallery_pool.clear()
-        self.gallery.cancel_pending()
+        self.gallery.shutdown()
         self.viewer.shutdown()
         event.accept()

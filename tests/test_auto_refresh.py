@@ -21,7 +21,11 @@ from onthisday.ui.main_window import MainWindow
 APP = QApplication.instance() or QApplication([])
 
 
-class AutoRefreshTests(unittest.TestCase):
+class WindowTestCase(unittest.TestCase):
+    """A main window on a temporary library holding one photo dated today."""
+
+    unplugged_at_launch = False
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         root = Path(self.temp.name)
@@ -29,6 +33,9 @@ class AutoRefreshTests(unittest.TestCase):
         self.library = root / "library"
         self.library.mkdir()
         self.add_photo("first.jpg")  # dated by its file time: today
+        self.unplugged = self.library.with_name("unplugged")
+        if self.unplugged_at_launch:
+            self.library.rename(self.unplugged)
         self.patches = [
             patch.object(database, "APP_DIR", app_dir),
             patch.object(database, "DB_FILE", app_dir / "photo_index.sqlite3"),
@@ -68,6 +75,8 @@ class AutoRefreshTests(unittest.TestCase):
     def shown(self) -> set[str]:
         return {record.path.name for record in self.window.gallery.records}
 
+
+class AutoRefreshTests(WindowTestCase):
     def test_launch_scan_then_rescan_on_return(self):
         APP.processEvents()  # runs the startup step
         self.wait_until(lambda: self.shown() == {"first.jpg"})  # without pressing Rescan
@@ -82,13 +91,38 @@ class AutoRefreshTests(unittest.TestCase):
     def test_unplugged_drive_does_not_interrupt_with_a_dialog(self):
         APP.processEvents()
         self.wait_until(lambda: self.window.last_scan_finished is not None)
-        self.library.rename(self.library.with_name("unplugged"))
+        self.library.rename(self.unplugged)
         self.window.last_scan_finished -= AUTO_RESCAN_SECONDS
         finished = self.window.last_scan_finished
         self.window.rescan_if_stale()
         self.wait_until(lambda: self.window.last_scan_finished != finished)
         self.assertEqual(self.errors, [])
         self.assertIn("unavailable", self.window.status.text())
+
+
+class UnpluggedAtLaunchTests(WindowTestCase):
+    """The library's drive is not connected when the app starts."""
+
+    unplugged_at_launch = True
+
+    def test_library_comes_back_when_the_drive_does(self):
+        APP.processEvents()
+        self.wait_until(lambda: self.window.last_scan_finished is not None)
+        self.wait_until(lambda: self.window.gallery.empty.title_label.text() == "Library folder unavailable")
+        self.assertEqual(self.window.root_folder, self.library, "the saved folder must not be forgotten")
+        self.assertEqual(self.errors, [])
+        self.unplugged.rename(self.library)  # plugged back in
+        self.window.rescan_if_stale()  # returning to the app; no ten-minute wait
+        self.wait_until(lambda: self.shown() == {"first.jpg"})
+
+
+class SettingsTests(unittest.TestCase):
+    def test_missing_folder_is_remembered(self):
+        with tempfile.TemporaryDirectory() as temp:
+            config = Path(temp) / "config.json"
+            config.write_text('{"photo_folder": "/Volumes/Unplugged Drive/Photos"}')
+            with patch.object(settings, "CONFIG_FILE", config):
+                self.assertEqual(SettingsStore().load().photo_folder, Path("/Volumes/Unplugged Drive/Photos"))
 
 
 if __name__ == "__main__":

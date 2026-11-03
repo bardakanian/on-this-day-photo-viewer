@@ -25,9 +25,9 @@ class SettingsStore:
         folder = None
         folder_text = data.get("photo_folder", "")
         if folder_text:
-            candidate = Path(folder_text).expanduser()
-            if candidate.is_dir():
-                folder = candidate
+            # Kept even when it's missing right now: it may be on a drive that isn't connected,
+            # and dropping it would make the next save forget the library for good.
+            folder = Path(folder_text).expanduser()
         theme = data.get("theme", "system")
         if theme not in {"system", "light", "dark"}:
             theme = "system"

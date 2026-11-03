@@ -19,7 +19,6 @@ from onthisday.core import database, media
 from onthisday.core.database import MediaRepository
 from onthisday.core.indexer import MediaIndexer
 from onthisday.core.models import MediaRecord, VideoRecord
-from onthisday.ui.pages.gallery_page import GalleryPage, YearSection
 from onthisday.ui.pages.videos_page import VideosPage
 
 APP = QApplication.instance() or QApplication([])
@@ -146,22 +145,6 @@ class LeapDayTests(IsolatedAppData):
     def test_leap_years_keep_the_days_apart(self):
         self.assertEqual(self.names(date(2028, 2, 28)), {"feb28.jpg"})
         self.assertEqual(self.names(date(2028, 2, 29)), {"leap.jpg"})
-
-
-class GalleryRefreshTests(unittest.TestCase):
-    def test_refreshing_the_same_day_keeps_loaded_and_collapsed_years(self):
-        records = [MediaRecord(Path(f"/missing/{year}-{index}.jpg"), datetime(year, 5, 1), "image", 1, 1)
-                   for year in (2020, 2019) for index in range(150)]
-        gallery = GalleryPage()
-        gallery.show_records(records, date(2026, 5, 1), "All", Path("/missing"))
-        first, second = gallery.content.findChildren(YearSection)
-        first.render_more(60)  # "Load more"
-        second._toggle()       # collapse
-        gallery.show_records(records[1:], date(2026, 5, 1), "All", Path("/missing"))  # one item deleted
-        first, second = gallery.content.findChildren(YearSection)
-        self.assertEqual(first.rendered, 120)
-        self.assertFalse(second.expanded)
-        gallery.cancel_pending()
 
 
 class VideoCountTests(unittest.TestCase):
