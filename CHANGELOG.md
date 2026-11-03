@@ -2,6 +2,16 @@
 
 With every change, bump `VERSION` in `onthisday/core/constants.py` and add an entry here.
 
+## 1.7.0 — 2026-11-02
+
+- The library refreshes itself: at launch, and when you return to the app after 10 minutes. Scans that find nothing new leave the gallery as it is.
+- A library on a drive that isn't connected is no longer forgotten. The gallery says the folder is unavailable, and the photos come back as soon as the drive does. Before, changing a setting while the drive was unplugged erased the saved folder.
+- The gallery is a virtual grid: only the cards on screen are drawn and load thumbnails, so every item shows without "Load more" and scrolling stays smooth at any size. Right-click a card for Open and Move to Trash.
+- Videos keep the local time they were recorded at (QuickTime creation date) instead of converting UTC with this computer's time zone, so travel videos land on the right day. The next scan re-reads dates once.
+- `tools/build_app.py` builds a standalone app (macOS .app, Windows .exe) that runs without Python or the project folder.
+- GitHub Actions runs the tests on macOS and Windows and builds both apps for every push.
+- Fixed the empty-gallery message being cut off at the bottom.
+
 ## 1.6.0 — 2026-11-01
 
 - Info panel in the viewer: select **Info** or press **I** to see the capture date and where it came from, dimensions, type, file size and path. Videos also show duration, frame rate and codec.
