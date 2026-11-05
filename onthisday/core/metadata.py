@@ -148,11 +148,18 @@ def date_source_label(metadata: MediaMetadata) -> str | None:
     return _DATE_SOURCES.get(metadata.date_source)
 
 
-def metadata_rows(metadata: MediaMetadata) -> list[tuple[str, str]]:
-    """(label, value) pairs for the Info panel, in display order; unknown values are left out."""
+def metadata_rows(metadata: MediaMetadata, indexed_date: datetime | None = None) -> list[tuple[str, str]]:
+    """(label, value) pairs for the Info panel, in display order; unknown values are left out.
+
+    `indexed_date` is the date the library index has for the item; it's shown when the file
+    itself can't be read (for example while its drive is disconnected).
+    """
+    captured_at = metadata.captured_at or indexed_date
     rows = [("Date recorded" if metadata.is_video else "Date taken",
-             format_date(metadata.captured_at) if metadata.captured_at else "Unknown")]
+             format_date(captured_at) if captured_at else "Unknown")]
     source = date_source_label(metadata)
+    if metadata.captured_at is None and indexed_date is not None:
+        source = "Library index (file not available)"
     if source:
         rows.append(("Date from", source))
     if metadata.dimensions:

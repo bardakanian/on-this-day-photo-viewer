@@ -97,7 +97,7 @@ class AutoRefreshTests(WindowTestCase):
         self.window.rescan_if_stale()
         self.wait_until(lambda: self.window.last_scan_finished != finished)
         self.assertEqual(self.errors, [])
-        self.assertIn("unavailable", self.window.status.text())
+        self.assertIn("not connected", self.window.status.text())
 
 
 class UnpluggedAtLaunchTests(WindowTestCase):

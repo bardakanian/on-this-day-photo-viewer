@@ -53,8 +53,12 @@ def decode_display_image(path: Path, max_edge: int | None) -> Decoded:
     return image, natural
 
 
-def load_placeholder(item: ViewerItem) -> QImage | None:
-    """The gallery thumbnail with its letterbox padding cropped off, or None if that isn't reliable."""
+def load_placeholder(item: ViewerItem, keep_padding: bool = False) -> QImage | None:
+    """The gallery thumbnail with its letterbox padding cropped off, or None if that isn't reliable.
+
+    With `keep_padding`, a thumbnail whose padding can't be found reliably is returned whole:
+    better than nothing while the original can't be reached.
+    """
     path = get_cached_thumbnail(item.path, "image", item.file_size, item.modified_ns)
     if path is None:
         return None
@@ -67,7 +71,9 @@ def load_placeholder(item: ViewerItem) -> QImage | None:
         return colour.red(), colour.green(), colour.blue()
 
     rect = letterbox_content_rect(image.width(), image.height(), pixel)
-    return image.copy(*rect) if rect else None
+    if rect:
+        return image.copy(*rect)
+    return image if keep_padding else None
 
 
 class _Signals(QObject):
@@ -101,8 +107,8 @@ class ViewerImageLoader(QObject):
     def request(self, item: ViewerItem, max_edge: int | None) -> None:
         self._submit(self._key(item, max_edge), lambda: decode_display_image(item.path, max_edge))
 
-    def request_placeholder(self, item: ViewerItem) -> None:
-        self._submit(self._key(item, PLACEHOLDER), lambda: (load_placeholder(item), None))
+    def request_placeholder(self, item: ViewerItem, keep_padding: bool = False) -> None:
+        self._submit(self._key(item, PLACEHOLDER), lambda: (load_placeholder(item, keep_padding), None))
 
     def focus(self, keep: list[tuple[ViewerItem, object]]) -> None:
         """Drop queued work that isn't for the current photo or its neighbours, in the given order."""

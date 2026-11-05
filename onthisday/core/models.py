@@ -25,6 +25,18 @@ class VideoRecord:
 
 
 @dataclass(frozen=True, slots=True)
+class PreviewItem:
+    """What the background preview saver needs to know about one indexed file."""
+
+    path: Path
+    media_type: str
+    file_size: int
+    modified_ns: int
+    month: int | None
+    day: int | None
+
+
+@dataclass(frozen=True, slots=True)
 class YearMediaCount:
     year: int
     photos: int

@@ -4,7 +4,7 @@ from datetime import date, datetime
 from pathlib import Path
 
 from .constants import APP_DIR, DB_FILE, THUMBNAIL_DIR
-from .models import AnalyticsResult, MediaRecord, VideoRecord, YearMediaCount
+from .models import AnalyticsResult, MediaRecord, PreviewItem, VideoRecord, YearMediaCount
 
 
 def ensure_app_dirs() -> None:
@@ -58,7 +58,26 @@ class MediaRepository:
         finally:
             connection.close()
 
-    def matches_for_date(self, folder: Path, selected_date: date, media_filter: str) -> list[MediaRecord]:
+    def preview_items(self, folder: Path) -> list[PreviewItem]:
+        """Every indexed item in the folder, for saving previews in the background."""
+        connection = open_database()
+        try:
+            rows = connection.execute("""
+                SELECT file_path, media_type, file_size, modified_ns, capture_month, capture_day
+                FROM photos WHERE folder_root = ?
+            """, (str(folder.resolve()),)).fetchall()
+        finally:
+            connection.close()
+        return [PreviewItem(Path(path), media_type or "image", size, modified, month, day)
+                for path, media_type, size, modified, month, day in rows]
+
+    def matches_for_date(self, folder: Path, selected_date: date, media_filter: str,
+                         check_files: bool = True) -> list[MediaRecord]:
+        """Items captured on this month and day in any year, newest first.
+
+        With `check_files` off, files that can't be found are included too: used while the
+        library's drive is disconnected, when the gallery shows saved previews instead.
+        """
         days = [selected_date.day]
         if (selected_date.month, selected_date.day) == (2, 28) and not calendar.isleap(selected_date.year):
             # There is no February 29 this year, so leap-day media shows up a day early instead.
@@ -79,7 +98,7 @@ class MediaRepository:
             records = []
             for file_path, capture_ts, media_type, file_size, modified_ns in connection.execute(sql, params):
                 path = Path(file_path)
-                if not path.exists():
+                if check_files and not path.exists():
                     continue
                 try:
                     captured_at = datetime.fromisoformat(capture_ts)
