@@ -1,5 +1,7 @@
 # On This Day
 
+[![CI](https://github.com/bardakanian/on-this-day-photo-viewer/actions/workflows/ci.yml/badge.svg)](https://github.com/bardakanian/on-this-day-photo-viewer/actions/workflows/ci.yml)
+
 A privacy-first desktop app for rediscovering photos and videos captured on the
 same calendar day across different years.
 
@@ -17,7 +19,9 @@ generation, search, and library analytics all stay on your computer.
 - Generates Retina-ready thumbnails away from the main interface and reuses cached results.
 - Keeps the interface responsive: date lookups, thumbnails, and photo decoding all happen
   in the background, and scans read capture dates in parallel.
-- Loads large year groups in batches to keep the gallery responsive.
+- Draws the gallery as a virtual grid: only cards on screen are drawn and load thumbnails,
+  so a day with thousands of items scrolls as smoothly as a day with ten.
+- Keeps itself current: the library is re-checked at launch and when you return to the app.
 - Includes a searchable, sortable library of every indexed video.
 - Calculates folder-specific Library Insights from the existing SQLite index.
 - Opens photos and videos in a full-window viewer with zoom, pan, and in-app video
@@ -63,6 +67,10 @@ Search and sort indexed videos without leaving the desktop app.
    entries (and cached thumbnails) for files that are no longer present. If the
    folder is unavailable, such as an unplugged drive, or contains no media at all,
    the scan leaves the existing index untouched.
+5. The library is checked again each time the app starts, and when you come back to
+   the app after 10 minutes or more, so new photos appear without a manual rescan. If the
+   library's drive isn't connected, the gallery says so, keeps the folder, and shows the
+   photos again as soon as the drive is back.
 
 The initial scan can take time for a large library. Subsequent scans are faster
 because unchanged files do not need to be analyzed again.
@@ -143,17 +151,38 @@ python tools/make_launcher.py
 Either way, the launcher runs `app.py` with the project's `.venv`, so it always starts
 your latest code. Re-run the script if you move the project folder.
 
+### 6. Optional: build a standalone app
+
+```bash
+python -m pip install -r requirements-dev.txt
+python tools/build_app.py
+```
+
+This bundles Python, Qt and FFmpeg with PyInstaller into an app that runs without this
+project folder: `dist/standalone/On This Day.app` on macOS, or a `dist/standalone/On This Day/`
+folder with `On This Day.exe` on Windows, plus a zip to share in `dist/`. On macOS,
+`--install` copies it into `/Applications`. Unlike the launcher, it doesn't pick up code
+changes until you build again.
+
+Each push to GitHub also builds both apps; download them from the run's **Artifacts** on
+the [Actions page](https://github.com/bardakanian/on-this-day-photo-viewer/actions/workflows/ci.yml).
+The macOS app is signed ad hoc rather than with an Apple Developer ID, so on another Mac
+open it the first time with right-click > **Open** (or System Settings > Privacy & Security >
+**Open Anyway**). Windows may show a SmartScreen prompt for the same reason.
+
 ## Using the app
 
 ### Browse the daily gallery
 
 - Use **Choose Folder** to select or change the active media library.
-- Use **Rescan** after adding, moving, editing, or removing files outside the app.
+- The library refreshes itself at launch and when you return to the app; use **Rescan**
+  to check right away after adding, moving, editing, or removing files.
 - Use the arrow controls to browse adjacent dates or **Today** to return to the
   current date.
 - Use the media filter to show all items, photos only, or videos only.
 - Select a thumbnail to open it in the viewer (see below).
-- Collapse or expand a year section to focus the timeline.
+- Collapse or expand a year by selecting its heading.
+- Right-click a card for **Open** and **Move to Trash**.
 
 ### Search the Video Library
 
@@ -170,8 +199,7 @@ and buttons for **Info**, **Open in Default App** and **Move to Trash**.
 
 - **Moving between items:** use **←** and **→** (or the arrow buttons), and **Home**
   or **End** for the first or last item. From the gallery, this steps through every
-  item for the selected day, across all years, including items not yet shown with
-  **Load more**. From the Video Library, it follows the table's current sort order and
+  item for the selected day, across all years, including collapsed ones. From the Video Library, it follows the table's current sort order and
   search results.
 - **Going back:** press **Esc** or select **‹ Back**. You return to the page you came
   from, at the same scroll position.
@@ -236,6 +264,9 @@ Each file's capture date comes from the first of these that exists:
 
 1. **Embedded metadata:** for images, the EXIF date taken (falling back to the digitized date, then the
    last-modified date that editors rewrite); for videos, the creation time inside the file (read with FFmpeg).
+   Videos from iPhones and many cameras also record the local time where they were made; that
+   time is used as is, so a video recorded while travelling stays on the day it was recorded
+   there. Otherwise the file's UTC creation time is converted with this computer's time zone.
 2. **A date macOS Spotlight found in the file's content** (macOS only). It's ignored when it equals the
    file's own creation time, because then it's just when the file was copied to this disk.
 3. **The earlier of the file's creation and modification times.** Copying a file to a
@@ -333,21 +364,25 @@ onthisday/
 ├── core/
 │   ├── constants.py      App name, VERSION, paths, and file types
 │   ├── database.py       SQLite repository and Library Insights queries
+│   ├── gallery_layout.py Where the gallery's year headings and cards go
 │   ├── indexer.py        Recursive, incremental, parallel media indexing
 │   ├── media.py          Metadata detection, thumbnails, and viewer image decoding
 │   ├── metadata.py       Details for the viewer's Info panel (dimensions, video codec, …)
 │   ├── models.py         Shared immutable data models
 │   ├── settings.py       Local configuration persistence
-│   ├── workqueue.py      Background job queue for the viewer
+│   ├── workqueue.py      Background job queues for thumbnails and the viewer
 │   └── zoom.py           Zoom and pan arithmetic for the photo viewer
 └── ui/
     ├── pages/            Gallery, Video Library, Library Insights, and the viewer
     ├── theme/            Color palettes, typography, metrics, and stylesheets
     ├── viewer_images.py  Background photo decoding with neighbour prefetch
     ├── viewer_metadata.py Background reading of Info panel details
-    └── widgets/          Media cards, photo canvas, video player, Info panel, and shared controls
-tools/make_launcher.py    macOS app / Windows Start-menu shortcut builder
-tests/                    Storage, indexing, date, viewer, and Windows tests
+    └── widgets/          Gallery grid, photo canvas, video player, Info panel, and shared controls
+tools/make_launcher.py    macOS app / Windows Start-menu shortcut that runs this project
+tools/build_app.py        Standalone macOS app / Windows .exe built with PyInstaller
+tests/                    Storage, indexing, date, gallery, viewer, build, and Windows tests
+.github/workflows/ci.yml  Tests on macOS and Windows, and standalone builds
+requirements-dev.txt      requirements.txt plus PyInstaller
 assets/screenshots/       Sanitized documentation screenshots
 ```
 
@@ -358,6 +393,8 @@ Run the automated tests from the project root:
 ```bash
 python -m unittest discover -s tests -v
 ```
+
+The same tests run on macOS and Windows in GitHub Actions for every push and pull request.
 
 Check that the application modules compile:
 
@@ -377,7 +414,10 @@ For this checkout, the project virtual environment can be used directly:
   same environment used to launch the app.
 - **Video dates or thumbnails are unavailable:** confirm that `imageio-ffmpeg` is
   installed, then rescan the library.
-- **Recently changed media is not visible:** use **Rescan** to refresh the index.
+- **Recently changed media is not visible:** the library refreshes when you return to
+  the app after 10 minutes; use **Rescan** to refresh it now.
+- **"Library folder unavailable":** connect the drive or network share that holds the
+  library. The photos come back when you return to the app.
 - **A detected date looks wrong:** inspect the file's EXIF, embedded video metadata,
   Spotlight metadata, and filesystem timestamps.
 - **The app cannot move a file to Trash:** confirm that the file still exists and

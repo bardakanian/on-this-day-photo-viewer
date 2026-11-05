@@ -1,16 +1,17 @@
 import logging
 import threading
+import time
 from datetime import date, timedelta
 from pathlib import Path
 
-from PySide6.QtCore import QFile, QObject, QRunnable, QThreadPool, Qt, QTimer, Signal
+from PySide6.QtCore import QEvent, QFile, QObject, QRunnable, QThreadPool, Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QCloseEvent, QKeySequence
 from PySide6.QtWidgets import (
     QApplication, QComboBox, QFileDialog, QFrame, QHBoxLayout, QLabel, QMainWindow,
     QMessageBox, QProgressBar, QPushButton, QStackedWidget, QStyle, QVBoxLayout, QWidget,
 )
 
-from ..core.constants import APP_NAME, VERSION
+from ..core.constants import APP_NAME, AUTO_RESCAN_SECONDS, VERSION
 from ..core.database import MediaRepository
 from ..core.indexer import MediaIndexer
 from ..core.media import FFMPEG_ENABLED, HEIC_ENABLED, open_in_default_app, thumbnail_cache_files
@@ -73,7 +74,10 @@ class GalleryLoadTask(QRunnable):
         event = {"request_id": self.request_id, "folder": self.folder,
                  "date": self.selected_date, "filter": self.media_filter}
         try:
-            event["records"] = self.repository.matches_for_date(self.folder, self.selected_date, self.media_filter)
+            if not self.folder.is_dir():
+                event["unavailable"] = True  # e.g. an external drive that isn't connected
+            else:
+                event["records"] = self.repository.matches_for_date(self.folder, self.selected_date, self.media_filter)
         except Exception as exc:
             event["error"] = exc
         try:
@@ -95,6 +99,10 @@ class MainWindow(QMainWindow):
         self.stop_event = threading.Event()
         self.active_scan_id = 0
         self.pending_index_start = False
+        # Scans started by the app itself (at launch, on return) stay quiet about an unplugged drive.
+        self.scan_is_automatic = False
+        self.last_scan_finished: float | None = None
+        self.library_unavailable = False
         self.index_events = IndexEvents()
         self.index_events.received.connect(self._handle_index_event)
         self.analytics_events = AnalyticsEvents()
@@ -189,6 +197,7 @@ class MainWindow(QMainWindow):
         self.gallery.choose_folder_requested.connect(self.choose_folder)
         self.gallery.open_requested.connect(self._open_from_gallery)
         self.gallery.delete_requested.connect(self.delete_media)
+        self.gallery.set_theme_colors(self.theme.colors)
         self.videos = VideosPage()
         self.videos.back_requested.connect(lambda: self.stack.setCurrentWidget(self.gallery))
         self.videos.refresh_requested.connect(self._load_videos)
@@ -198,7 +207,7 @@ class MainWindow(QMainWindow):
         self.insights.choose_folder_requested.connect(self.choose_folder)
         self.insights.rescan_requested.connect(self.start_indexing)
         self.insights.retry_requested.connect(self._load_insights)
-        self.theme.changed.connect(lambda _preference: self.insights.set_theme_colors(self.theme.colors))
+        self.theme.changed.connect(self._theme_changed)
         self.stack.addWidget(self.gallery)
         self.stack.addWidget(self.videos)
         self.stack.addWidget(self.insights)
@@ -265,6 +274,8 @@ class MainWindow(QMainWindow):
         self.refresh_gallery()
         if self.root_folder:
             self._load_insights()
+            # Pick up photos added since the last session. Unchanged files are only stat'ed, so this is quick.
+            self.start_indexing(automatic=True)
         missing = []
         if not HEIC_ENABLED:
             missing.append("HEIC image support")
@@ -297,17 +308,21 @@ class MainWindow(QMainWindow):
         self._load_insights()
         self.start_indexing()
 
-    def start_indexing(self) -> None:
+    def start_indexing(self, *_signal_args, automatic: bool = False) -> None:
         if self.root_folder is None:
-            self.choose_folder()
+            if not automatic:
+                self.choose_folder()
             return
         if self.index_thread and self.index_thread.is_alive():
+            if automatic:
+                return  # the running scan will find the same changes
             self.pending_index_start = True
             self.stop_event.set()
             self.status.setText("Stopping the current scan…")
             QTimer.singleShot(80, self.start_indexing)
             return
         self.pending_index_start = False
+        self.scan_is_automatic = automatic
         self.active_scan_id += 1
         self.stop_event = threading.Event()
         indexer = MediaIndexer(self.root_folder, self.stop_event, self.active_scan_id, self.index_events.received.emit)
@@ -328,6 +343,7 @@ class MainWindow(QMainWindow):
             )
         elif event_type in {"scan_complete", "scan_cancelled", "scan_error"}:
             self.progress.hide()
+            self.last_scan_finished = time.monotonic()
             if self.pending_index_start:
                 self.status.setText("Starting requested scan…")
                 return
@@ -336,16 +352,21 @@ class MainWindow(QMainWindow):
                 self.status.setText(
                     f"Library ready  ·  {event['total_indexed']:,} items  ·  {event['updated']:,} updated  ·  {event['deleted']:,} removed"
                 )
-                self.refresh_gallery()
-                if self.stack.currentWidget() is self.videos:
-                    self._load_videos()
-                self._load_insights()
+                if event["updated"] or event["deleted"] or self.library_unavailable:
+                    # Rebuilding unchanged pages would only flicker and reload thumbnails.
+                    self.refresh_gallery()
+                    if self.stack.currentWidget() is self.videos:
+                        self._load_videos()
+                    self._load_insights()
             elif event_type == "scan_cancelled":
                 self.status.setText("Indexing cancelled")
             else:
-                self.status.setText("Indexing failed")
                 LOGGER.error("Indexing failed: %s", event.get("message", "Unknown error"))
-                self._error("Unable to index the library", "The folder may be unavailable or contain files that cannot be read. Details were written to the application log.")
+                if self.scan_is_automatic:
+                    self.status.setText("Library folder unavailable  ·  connect it and choose Rescan")
+                else:
+                    self.status.setText("Indexing failed")
+                    self._error("Unable to index the library", "The folder may be unavailable or contain files that cannot be read. Details were written to the application log.")
 
     def refresh_gallery(self) -> None:
         self.gallery_request_id += 1
@@ -363,6 +384,10 @@ class MainWindow(QMainWindow):
     def _handle_gallery_event(self, event: dict) -> None:
         if event.get("request_id") != self.gallery_request_id or event.get("folder") != self.root_folder:
             return
+        self.library_unavailable = bool(event.get("unavailable"))
+        if self.library_unavailable:
+            self.gallery.show_unavailable(event["folder"])
+            return
         records = event.get("records", [])
         if "error" in event:
             LOGGER.error("Could not query gallery records: %s", event["error"])
@@ -372,6 +397,10 @@ class MainWindow(QMainWindow):
     def _filter_changed(self, value: str) -> None:
         self.media_filter = value
         self.refresh_gallery()
+
+    def _theme_changed(self, _preference: str) -> None:
+        self.insights.set_theme_colors(self.theme.colors)
+        self.gallery.set_theme_colors(self.theme.colors)
 
     def _page_changed(self, index: int) -> None:
         page = self.stack.widget(index)
@@ -536,10 +565,24 @@ class MainWindow(QMainWindow):
     def _error(self, title: str, message: str) -> None:
         QMessageBox.critical(self, title, message)
 
+    def changeEvent(self, event: QEvent) -> None:
+        if event.type() == QEvent.Type.ActivationChange and self.isActiveWindow():
+            self.rescan_if_stale()
+        super().changeEvent(event)
+
+    def rescan_if_stale(self) -> None:
+        """Re-check the library when returning to the app, at most every AUTO_RESCAN_SECONDS."""
+        if self.last_scan_finished is None:
+            return  # the launch scan is still running
+        # While the library is unavailable, every return checks whether its drive is back. The check
+        # runs on the scan's thread, since a disconnected network share can take a while to answer.
+        if self.library_unavailable or time.monotonic() - self.last_scan_finished >= AUTO_RESCAN_SECONDS:
+            self.start_indexing(automatic=True)
+
     def closeEvent(self, event: QCloseEvent) -> None:
         self.stop_event.set()
         self.analytics_pool.clear()
         self.gallery_pool.clear()
-        self.gallery.cancel_pending()
+        self.gallery.shutdown()
         self.viewer.shutdown()
         event.accept()
