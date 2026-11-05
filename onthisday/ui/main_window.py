@@ -17,6 +17,7 @@ from ..core.indexer import MediaIndexer
 from ..core.media import FFMPEG_ENABLED, HEIC_ENABLED, open_in_default_app, thumbnail_cache_files
 from ..core.models import MediaRecord, VideoRecord, ViewerItem
 from ..core.settings import SettingsStore
+from ..core.thumbnail_warmer import in_preview_order, warm_thumbnails
 from .dialogs import PreferencesDialog
 from .pages import GalleryPage, LibraryInsightsPage, VideosPage, ViewerPage
 from .theme import ThemeManager
@@ -25,6 +26,10 @@ LOGGER = logging.getLogger(__name__)
 
 
 class IndexEvents(QObject):
+    received = Signal(object)
+
+
+class PreviewEvents(QObject):
     received = Signal(object)
 
 
@@ -74,10 +79,10 @@ class GalleryLoadTask(QRunnable):
         event = {"request_id": self.request_id, "folder": self.folder,
                  "date": self.selected_date, "filter": self.media_filter}
         try:
-            if not self.folder.is_dir():
-                event["unavailable"] = True  # e.g. an external drive that isn't connected
-            else:
-                event["records"] = self.repository.matches_for_date(self.folder, self.selected_date, self.media_filter)
+            # A drive that isn't connected: show what the index knows, with the previews saved earlier.
+            event["unavailable"] = not self.folder.is_dir()
+            event["records"] = self.repository.matches_for_date(
+                self.folder, self.selected_date, self.media_filter, check_files=not event["unavailable"])
         except Exception as exc:
             event["error"] = exc
         try:
@@ -103,6 +108,11 @@ class MainWindow(QMainWindow):
         self.scan_is_automatic = False
         self.last_scan_finished: float | None = None
         self.library_unavailable = False
+        self.preview_events = PreviewEvents()
+        self.preview_events.received.connect(self._handle_preview_event)
+        self.preview_stop = threading.Event()
+        self.preview_thread: threading.Thread | None = None
+        self.ready_text = ""  # the status line after a scan, which preview progress is added to
         self.index_events = IndexEvents()
         self.index_events.received.connect(self._handle_index_event)
         self.analytics_events = AnalyticsEvents()
@@ -294,6 +304,7 @@ class MainWindow(QMainWindow):
             self._error("Folder unavailable", "The selected folder could not be opened.")
             return
         self.stop_event.set()
+        self.stop_saving_previews()
         self.settings.photo_folder = folder
         try:
             self.settings_store.save(self.settings)
@@ -323,6 +334,7 @@ class MainWindow(QMainWindow):
             return
         self.pending_index_start = False
         self.scan_is_automatic = automatic
+        self.stop_saving_previews()  # restarted when the scan finishes, with its results
         self.active_scan_id += 1
         self.stop_event = threading.Event()
         indexer = MediaIndexer(self.root_folder, self.stop_event, self.active_scan_id, self.index_events.received.emit)
@@ -349,9 +361,11 @@ class MainWindow(QMainWindow):
                 return
             self.rescan_button.setEnabled(True)
             if event_type == "scan_complete":
-                self.status.setText(
+                self.ready_text = (
                     f"Library ready  ·  {event['total_indexed']:,} items  ·  {event['updated']:,} updated  ·  {event['deleted']:,} removed"
                 )
+                self.status.setText(self.ready_text)
+                self.start_saving_previews()
                 if event["updated"] or event["deleted"] or self.library_unavailable:
                     # Rebuilding unchanged pages would only flicker and reload thumbnails.
                     self.refresh_gallery()
@@ -363,7 +377,7 @@ class MainWindow(QMainWindow):
             else:
                 LOGGER.error("Indexing failed: %s", event.get("message", "Unknown error"))
                 if self.scan_is_automatic:
-                    self.status.setText("Library folder unavailable  ·  connect it and choose Rescan")
+                    self.status.setText("Library drive not connected  ·  showing saved previews until it's back")
                 else:
                     self.status.setText("Indexing failed")
                     self._error("Unable to index the library", "The folder may be unavailable or contain files that cannot be read. Details were written to the application log.")
@@ -385,14 +399,11 @@ class MainWindow(QMainWindow):
         if event.get("request_id") != self.gallery_request_id or event.get("folder") != self.root_folder:
             return
         self.library_unavailable = bool(event.get("unavailable"))
-        if self.library_unavailable:
-            self.gallery.show_unavailable(event["folder"])
-            return
         records = event.get("records", [])
         if "error" in event:
             LOGGER.error("Could not query gallery records: %s", event["error"])
             self._error("Unable to load your library", "The media index could not be read. Try rescanning the library.")
-        self.gallery.show_records(records, event["date"], event["filter"], event["folder"])
+        self.gallery.show_records(records, event["date"], event["filter"], event["folder"], offline=self.library_unavailable)
 
     def _filter_changed(self, value: str) -> None:
         self.media_filter = value
@@ -417,6 +428,7 @@ class MainWindow(QMainWindow):
         if current is not self.viewer:
             self._viewer_return = current
         self.stack.setCurrentWidget(self.viewer)
+        self.viewer.set_offline(self.library_unavailable)
         self.viewer.show_items(items, index)
 
     def _open_from_gallery(self, record: MediaRecord) -> None:
@@ -551,11 +563,58 @@ class MainWindow(QMainWindow):
         self._load_insights()
         return True
 
+    # Saved previews ------------------------------------------------------------
+
+    def start_saving_previews(self) -> None:
+        """Save a preview of every indexed item in the background, soonest calendar days first."""
+        folder = self.root_folder
+        if folder is None or not self.settings.save_previews:
+            return
+        self.stop_saving_previews()
+        stop = self.preview_stop = threading.Event()
+        repository, emit = self.repository, self.preview_events.received.emit
+
+        def run():
+            try:
+                items = in_preview_order(repository.preview_items(folder), date.today())
+                result = warm_thumbnails(items, folder, stop,
+                                         lambda done, missing: emit({"stop": stop, "done": done, "missing": missing}))
+                emit({"stop": stop, "result": result})
+            except Exception:  # includes the window closing while a progress event was being sent
+                LOGGER.exception("Saving previews stopped")
+
+        self.preview_thread = threading.Thread(target=run, daemon=True, name="preview-saver")
+        self.preview_thread.start()
+
+    def stop_saving_previews(self) -> None:
+        self.preview_stop.set()
+
+    def _handle_preview_event(self, event: dict) -> None:
+        if event["stop"] is not self.preview_stop or self.scan_running():
+            return  # from a run that was stopped, or a scan is showing its own progress
+        if "result" in event:
+            result = event["result"]
+            if result.created:
+                LOGGER.info("Saved %d previews (%d unreadable)", result.created, result.failed)
+            self.status.setText(self.ready_text)
+        elif event["missing"]:
+            self.status.setText(f"{self.ready_text}  ·  saving previews {event['done']:,} of {event['missing']:,}")
+
+    def scan_running(self) -> bool:
+        return bool(self.index_thread and self.index_thread.is_alive())
+
     def show_preferences(self) -> None:
-        dialog = PreferencesDialog(self.settings.theme, self)
+        dialog = PreferencesDialog(self.settings.theme, self.settings.save_previews, self)
         if dialog.exec():
             self.settings.theme = dialog.selected_theme
             self.theme.apply(self.settings.theme)
+            if dialog.selected_save_previews != self.settings.save_previews:
+                self.settings.save_previews = dialog.selected_save_previews
+                if self.settings.save_previews:
+                    self.start_saving_previews()
+                else:
+                    self.stop_saving_previews()
+                    self.status.setText(self.ready_text or self.status.text())
             try:
                 self.settings_store.save(self.settings)
             except OSError:
@@ -581,6 +640,7 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event: QCloseEvent) -> None:
         self.stop_event.set()
+        self.stop_saving_previews()
         self.analytics_pool.clear()
         self.gallery_pool.clear()
         self.gallery.shutdown()

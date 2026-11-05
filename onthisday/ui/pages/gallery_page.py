@@ -54,17 +54,10 @@ class GalleryPage(QWidget):
     def shutdown(self) -> None:
         self.grid.shutdown()
 
-    def show_unavailable(self, folder: Path) -> None:
-        self.cancel_pending()
-        self.records = []
-        self.grid.set_sections([], folder)
-        self.summary.setText(str(folder))
-        self.empty.set_content("Library folder unavailable",
-                               f"Connect the drive or network share that holds “{folder.name or folder}”. "
-                               "Your photos appear again as soon as it's back.")
-        self.results.setCurrentIndex(1)
-
-    def show_records(self, records: list[MediaRecord], selected_date: date, media_filter: str, folder: Path | None) -> None:
+    def show_records(self, records: list[MediaRecord], selected_date: date, media_filter: str, folder: Path | None,
+                     offline: bool = False) -> None:
+        """Show one day's items. `offline`: the library's drive is disconnected, so the items come from
+        the index and show their saved previews."""
         self.cancel_pending()
         # Reloading the same day (after a rescan or a deletion) keeps the scroll position and collapsed years.
         key = (folder, selected_date, media_filter)
@@ -77,8 +70,13 @@ class GalleryPage(QWidget):
         self.header.subtitle.setText(f"{media_filter} captured on this date across your library")
         self.records = []
         if folder is None or not records:
-            self.grid.set_sections([], folder)
-            if folder is None:
+            self.grid.set_sections([], folder, offline=offline)
+            if offline:
+                self.summary.setText(str(folder))
+                self.empty.set_content("Library folder unavailable",
+                                       f"Connect the drive or network share that holds “{folder.name or folder}”. "
+                                       f"Nothing from {display_date} has been indexed yet to show without it.")
+            elif folder is None:
                 self.summary.clear()
                 self.empty.set_content("Choose your media library",
                                        "Select a folder to begin rediscovering moments from years past.", "Choose Folder")
@@ -89,13 +87,17 @@ class GalleryPage(QWidget):
             self.results.setCurrentIndex(1)
             return
         photos = sum(record.media_type == "image" for record in records)
-        self.summary.setText(f"{len(records):,} items  ·  {photos:,} photos  ·  {len(records) - photos:,} videos")
+        counts = f"{len(records):,} items  ·  {photos:,} photos  ·  {len(records) - photos:,} videos"
+        if offline:
+            counts = (f"Library drive not connected  ·  showing saved previews  ·  {counts}  ·  "
+                      "connect it to open originals")
+        self.summary.setText(counts)
         grouped: dict[int, list[MediaRecord]] = defaultdict(list)
         for record in records:
             grouped[record.captured_at.year].append(record)
         sections = [(year, grouped[year]) for year in sorted(grouped, reverse=True)]
         for _, items in sections:
             self.records.extend(items)
-        self.grid.set_sections(sections, folder, collapsed)
+        self.grid.set_sections(sections, folder, collapsed, offline)
         self.results.setCurrentIndex(0)
         self.grid.verticalScrollBar().setValue(scroll)

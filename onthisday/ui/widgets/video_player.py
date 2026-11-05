@@ -41,10 +41,10 @@ class VideoPlayer(QWidget):
         self.failure_label.setStyleSheet("color: #A6ADBA; font-size: 15px;")
         self.failure_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.failure_label.setWordWrap(True)
-        open_button = QPushButton("Open in Default App")
-        open_button.clicked.connect(self.open_externally_requested)
+        self.open_button = QPushButton("Open in Default App")
+        self.open_button.clicked.connect(self.open_externally_requested)
         failure_layout.addWidget(self.failure_label)
-        failure_layout.addWidget(open_button, alignment=Qt.AlignmentFlag.AlignCenter)
+        failure_layout.addWidget(self.open_button, alignment=Qt.AlignmentFlag.AlignCenter)
         self.screen_stack.addWidget(failure)
         layout.addWidget(self.screen_stack, 1)
 
@@ -152,7 +152,13 @@ class VideoPlayer(QWidget):
         self.play_button.setText(PAUSE if state == QMediaPlayer.PlaybackState.PlayingState else PLAY)
 
     def _failed(self, _error, message: str) -> None:
-        self.failure_label.setText("This video can't be played here." + (f"\n{message}" if message else ""))
+        self.show_unavailable("This video can't be played here." + (f"\n{message}" if message else ""))
+
+    def show_unavailable(self, text: str, can_open: bool = True) -> None:
+        self.player.stop()
+        self.player.setSource(QUrl())
+        self.failure_label.setText(text)
+        self.open_button.setVisible(can_open)
         self.screen_stack.setCurrentIndex(1)
 
     def _scrub_started(self) -> None:
