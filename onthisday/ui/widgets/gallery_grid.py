@@ -57,7 +57,9 @@ class ThumbnailLoader(QObject):
         self._signals = _Signals()
         self._signals.loaded.connect(self.loaded)
 
-    def request(self, record: MediaRecord, size: QSize) -> None:
+    def request(self, record: MediaRecord, size: QSize, generate_missing: bool = True) -> None:
+        """Load a saved thumbnail, making it first when it's missing (unless `generate_missing` is off,
+        as while the originals' drive is disconnected)."""
         key = _thumbnail_key(record)
         emit = self._emit
 
@@ -72,6 +74,9 @@ class ThumbnailLoader(QObject):
                 return
             # Show an older low-resolution thumbnail while the sharp one is made.
             legacy = legacy_thumbnail_cache_path(record.path, record.file_size, record.modified_ns)
+            if not generate_missing:
+                emit(key, _load_scaled(legacy, size) if legacy.exists() else None, True)
+                return
             if legacy.exists():
                 emit(key, _load_scaled(legacy, size), False)
             self._generate.submit(key, generate)
@@ -116,6 +121,7 @@ class GalleryGrid(QAbstractScrollArea):
         self.verticalScrollBar().setSingleStep(48)
         self.colors: Palette = LIGHT
         self.root_folder: Path | None = None
+        self.offline = False  # the originals' drive is disconnected: saved previews only, no Trash
         self.sections: list[tuple[int, list[MediaRecord]]] = []
         self.collapsed: set[int] = set()
         self.layout_: GalleryLayout = layout_sections([], [], 0)
@@ -139,7 +145,12 @@ class GalleryGrid(QAbstractScrollArea):
     # Content -------------------------------------------------------------------
 
     def set_sections(self, sections: list[tuple[int, list[MediaRecord]]], root_folder: Path | None,
-                     collapsed: set[int] | None = None) -> None:
+                     collapsed: set[int] | None = None, offline: bool = False) -> None:
+        if offline != self.offline:
+            # Previews looked up in the other mode may be wrong now: missing ones can be made
+            # once the drive is back, and ones made before it went away can be shown.
+            self.clear_thumbnails()
+        self.offline = offline
         self.sections = sections
         self.root_folder = root_folder
         self.collapsed = {year for year in (collapsed or set()) if any(year == y for y, _ in sections)}
@@ -253,8 +264,9 @@ class GalleryGrid(QAbstractScrollArea):
         elif pixmap is FAILED:
             painter.setFont(self._body_font)
             painter.setPen(QColor(c.text_muted))
-            painter.drawText(preview, Qt.AlignmentFlag.AlignCenter,
-                             "Video preview unavailable" if record.is_video else "Preview unavailable")
+            text = "No saved preview" if self.offline else (
+                "Video preview unavailable" if record.is_video else "Preview unavailable")
+            painter.drawText(preview, Qt.AlignmentFlag.AlignCenter, text)
 
         painter.setFont(self._caption_font)
         painter.setPen(QColor(c.text_subtle))
@@ -270,10 +282,13 @@ class GalleryGrid(QAbstractScrollArea):
 
         trash = self._trash_rect(cell)
         folder_rect = QRect(DETAILS_LINE.translated(cell.x, cell.y))
-        folder_rect.setRight(int(trash.left()) - 8)
+        if not self.offline:
+            folder_rect.setRight(int(trash.left()) - 8)
         painter.setPen(QColor(c.text_muted))
         painter.drawText(folder_rect, Qt.AlignmentFlag.AlignVCenter,
                          QFontMetrics(self._body_font).elidedText(self._folder_text(record), Qt.TextElideMode.ElideMiddle, folder_rect.width()))
+        if self.offline:
+            return  # nothing to move to the Trash while the file can't be reached
 
         danger = QColor(c.danger)
         hover_fill = QColor(danger)
@@ -313,7 +328,7 @@ class GalleryGrid(QAbstractScrollArea):
                 self._pixmaps.move_to_end(key)  # keep what's on screen in the cache
             if key not in self._requested and (key not in self._pixmaps or key in self._placeholders):
                 self._requested.add(key)
-                self.loader.request(record, size)
+                self.loader.request(record, size, generate_missing=not self.offline)
         for key in self.loader.focus(wanted):
             self._requested.discard(key)  # scrolled away; asked for again when it comes back
 
@@ -354,7 +369,7 @@ class GalleryGrid(QAbstractScrollArea):
         if cell.is_header:
             return cell, "header"
         local = QPointF(x - cell.x, y - cell.y)
-        if self._trash_rect(Cell(0, 0, 0, 0, cell.width, cell.height)).contains(local):
+        if not self.offline and self._trash_rect(Cell(0, 0, 0, 0, cell.width, cell.height)).contains(local):
             return cell, "trash"
         if QRectF(PREVIEW).contains(local):
             return cell, "preview"
@@ -406,8 +421,9 @@ class GalleryGrid(QAbstractScrollArea):
             return
         menu = QMenu(self)
         menu.addAction("Open", lambda: self.open_requested.emit(record))
-        menu.addSeparator()
-        menu.addAction(TRASH_LABEL, lambda: self.delete_requested.emit(record))
+        if not self.offline:
+            menu.addSeparator()
+            menu.addAction(TRASH_LABEL, lambda: self.delete_requested.emit(record))
         menu.exec(event.globalPos())
 
     def viewportEvent(self, event) -> bool:

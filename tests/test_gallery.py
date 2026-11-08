@@ -74,7 +74,7 @@ class GridTests(unittest.TestCase):
         APP.processEvents()  # lay the page out at its size
         self.requested = []
         self.patch = patch.object(self.page.grid.loader, "request",
-                                  side_effect=lambda record, size: self.requested.append(record))
+                                  side_effect=lambda record, size, **_options: self.requested.append(record))
         self.patch.start()
         self.page.show_records(records(2024, 2000) + records(2019, 3), date(2026, 5, 1), "All", Path("/library"))
         self.grid = self.page.grid

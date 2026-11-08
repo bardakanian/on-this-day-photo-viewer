@@ -56,8 +56,12 @@ class WindowTestCase(unittest.TestCase):
 
     def tearDown(self):
         self.window.close()
-        if self.window.index_thread:
-            self.window.index_thread.join(10)
+        for thread in (self.window.index_thread, self.window.preview_thread):
+            if thread:
+                thread.join(10)
+        # Queries still running would hold the temporary database open, which Windows won't delete.
+        self.window.gallery_pool.waitForDone(10000)
+        self.window.analytics_pool.waitForDone(10000)
         for item in reversed(self.patches):
             item.stop()
         self.temp.cleanup()
@@ -96,7 +100,7 @@ class AutoRefreshTests(WindowTestCase):
         self.window.rescan_if_stale()
         self.wait_until(lambda: self.window.last_scan_finished != finished)
         self.assertEqual(self.errors, [])
-        self.assertIn("unavailable", self.window.status.text())
+        self.assertIn("not connected", self.window.status.text())
 
 
 class UnpluggedAtLaunchTests(WindowTestCase):

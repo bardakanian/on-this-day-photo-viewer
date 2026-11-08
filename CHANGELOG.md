@@ -2,6 +2,13 @@
 
 With every change, bump `VERSION` in `onthisday/core/constants.py` and add an entry here.
 
+## 1.10.0 — 2026-11-08
+
+- After each scan, a preview of every item is saved in the background, starting with the calendar days coming up soonest. The status bar shows the progress. It can be turned off in Settings.
+- While the library's drive is disconnected, the gallery still shows every indexed item with its saved preview instead of an empty page. The viewer shows the preview enlarged to fit, and Open in Default App, Move to Trash and video playback wait until the drive is back. The Info panel falls back to the date in the index.
+- Saving previews resumes when the app opens, without scanning the library.
+- The viewer keeps a photo's preview on screen when the original can't be read, instead of replacing it with an error.
+
 ## 1.9.1 — 2026-11-08
 
 - The app no longer scans the library every time it opens; it shows the saved index right away. Use **Rescan** to pick up new files at any time. The library is still re-checked when you return to the app after 10 minutes.
