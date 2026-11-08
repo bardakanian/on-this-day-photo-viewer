@@ -2,6 +2,10 @@
 
 With every change, bump `VERSION` in `onthisday/core/constants.py` and add an entry here.
 
+## 1.10.1 — 2026-11-08
+
+- On a read-only drive, such as an NTFS drive on a Mac, Move to Trash is dimmed and explains why, instead of asking for confirmation and then failing with a permission error.
+
 ## 1.10.0 — 2026-11-08
 
 - After each scan, a preview of every item is saved in the background, starting with the calendar days coming up soonest. The status bar shows the progress. It can be turned off in Settings.

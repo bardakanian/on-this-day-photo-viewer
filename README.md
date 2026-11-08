@@ -266,6 +266,10 @@ system to move the original file to Trash. In the viewer, playback stops first s
 file can be moved, and the next item is shown afterwards. After a successful move, the matching SQLite record and cached
 thumbnail are removed and the gallery and Library Insights are refreshed.
 
+On a read-only drive, Move to Trash is dimmed and explains why. macOS can read NTFS drives
+but can't change them, so to delete files on one, install an NTFS driver, reformat the drive
+as APFS or exFAT after copying everything off it, or delete them from Windows.
+
 This action affects the original media file. Confirm that your system Trash and
 backups meet your recovery needs before using it.
 

@@ -133,6 +133,18 @@ class GridTests(unittest.TestCase):
         self.page.show_records(records(2024, 10), date(2026, 5, 2), "All", Path("/library"))
         self.assertEqual(self.grid.verticalScrollBar().value(), 0)  # a different day starts at the top
 
+    def test_read_only_drive_dims_trash_instead_of_asking(self):
+        deleted = []
+        self.grid.delete_requested.connect(deleted.append)
+        self.page.show_records(records(2024, 10), date(2026, 5, 1), "All", Path("/library"), read_only=True)
+        card = [cell for cell in self.grid.layout_.cells if not cell.is_header][0]
+        trash = self.grid._trash_rect(card).center()
+        self.click(trash.x(), trash.y())
+        self.assertEqual(deleted, [])
+        self.page.show_records(records(2024, 10), date(2026, 5, 1), "All", Path("/library"))
+        self.click(trash.x(), trash.y())
+        self.assertEqual(len(deleted), 1)  # a writable drive works as before
+
     def test_empty_day_shows_a_message(self):
         self.page.show_records([], date(2026, 5, 3), "Photos", Path("/library"))
         self.assertEqual(self.page.results.currentIndex(), 1)

@@ -6,7 +6,7 @@ from PySide6.QtGui import QColor, QCursor, QFont, QFontMetrics, QImage, QPainter
 from PySide6.QtWidgets import QAbstractScrollArea, QMenu, QToolTip
 
 from ...core.gallery_layout import CARD_WIDTH, Cell, GalleryLayout, layout_sections
-from ...core.media import get_cached_thumbnail, legacy_thumbnail_cache_path, thumbnail_cache_path
+from ...core.media import get_cached_thumbnail, legacy_thumbnail_cache_path, read_only_trash_reason, thumbnail_cache_path
 from ...core.models import MediaRecord
 from ...core.workqueue import WorkQueue
 from ..theme.colors import LIGHT, Palette
@@ -122,6 +122,7 @@ class GalleryGrid(QAbstractScrollArea):
         self.colors: Palette = LIGHT
         self.root_folder: Path | None = None
         self.offline = False  # the originals' drive is disconnected: saved previews only, no Trash
+        self.read_only = False  # the originals' drive can't be changed: Move to Trash is dimmed
         self.sections: list[tuple[int, list[MediaRecord]]] = []
         self.collapsed: set[int] = set()
         self.layout_: GalleryLayout = layout_sections([], [], 0)
@@ -145,7 +146,8 @@ class GalleryGrid(QAbstractScrollArea):
     # Content -------------------------------------------------------------------
 
     def set_sections(self, sections: list[tuple[int, list[MediaRecord]]], root_folder: Path | None,
-                     collapsed: set[int] | None = None, offline: bool = False) -> None:
+                     collapsed: set[int] | None = None, offline: bool = False, read_only: bool = False) -> None:
+        self.read_only = read_only
         if offline != self.offline:
             # Previews looked up in the other mode may be wrong now: missing ones can be made
             # once the drive is back, and ones made before it went away can be shown.
@@ -293,8 +295,10 @@ class GalleryGrid(QAbstractScrollArea):
         danger = QColor(c.danger)
         hover_fill = QColor(danger)
         hover_fill.setAlpha(28)
+        if self.read_only:
+            danger.setAlpha(90)
         painter.setPen(QPen(danger, 1))
-        painter.setBrush(hover_fill if self._is_hover(cell, "trash") else Qt.BrushStyle.NoBrush)
+        painter.setBrush(hover_fill if self._is_hover(cell, "trash") and not self.read_only else Qt.BrushStyle.NoBrush)
         painter.drawRoundedRect(trash.adjusted(0.5, 0.5, -0.5, -0.5), Metrics.RADIUS_SMALL, Metrics.RADIUS_SMALL)
         painter.drawText(trash, Qt.AlignmentFlag.AlignCenter, TRASH_LABEL)
 
@@ -386,7 +390,7 @@ class GalleryGrid(QAbstractScrollArea):
         target = self._target(event.position())
         if target != self._hover:
             self._hover = target
-            clickable = target is not None and target[1] in {"header", "trash", "preview"}
+            clickable = target is not None and (target[1] in {"header", "preview"} or (target[1] == "trash" and not self.read_only))
             self.viewport().setCursor(QCursor(Qt.CursorShape.PointingHandCursor if clickable else Qt.CursorShape.ArrowCursor))
             self.viewport().update()
         super().mouseMoveEvent(event)
@@ -409,6 +413,8 @@ class GalleryGrid(QAbstractScrollArea):
         cell, part = pressed
         if part == "header":
             self.toggle_section(self.sections[cell.section][0])
+        elif part == "trash" and self.read_only:
+            QToolTip.showText(event.globalPosition().toPoint(), read_only_trash_reason(), self.viewport())
         elif part == "trash" and (record := self.record_for(cell)) is not None:
             self.delete_requested.emit(record)
         elif part == "preview" and (record := self.record_for(cell)) is not None:
@@ -423,7 +429,7 @@ class GalleryGrid(QAbstractScrollArea):
         menu.addAction("Open", lambda: self.open_requested.emit(record))
         if not self.offline:
             menu.addSeparator()
-            menu.addAction(TRASH_LABEL, lambda: self.delete_requested.emit(record))
+            menu.addAction(TRASH_LABEL, lambda: self.delete_requested.emit(record)).setEnabled(not self.read_only)
         menu.exec(event.globalPos())
 
     def viewportEvent(self, event) -> bool:
@@ -433,7 +439,7 @@ class GalleryGrid(QAbstractScrollArea):
             tips = {
                 "name": str(record.path) if record else "",
                 "folder": str(record.path.parent) if record else "",
-                "trash": f"Move {record.path.name} to Trash" if record else "",
+                "trash": read_only_trash_reason() if self.read_only else f"Move {record.path.name} to Trash" if record else "",
             }
             text = tips.get(target[1], "") if target else ""
             if text:
