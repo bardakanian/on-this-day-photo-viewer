@@ -1,4 +1,4 @@
-"""The library refreshes itself at launch and when you come back to the app."""
+"""The library refreshes itself when you come back to the app, but not at launch."""
 
 import os
 
@@ -77,20 +77,19 @@ class WindowTestCase(unittest.TestCase):
 
 
 class AutoRefreshTests(WindowTestCase):
-    def test_launch_scan_then_rescan_on_return(self):
+    def test_no_scan_at_launch_then_rescan_on_return(self):
         APP.processEvents()  # runs the startup step
-        self.wait_until(lambda: self.shown() == {"first.jpg"})  # without pressing Rescan
+        self.assertIsNone(self.window.index_thread)
 
         self.add_photo("second.jpg")
-        self.window.rescan_if_stale()  # back in the app, but the last scan was just now
-        self.assertFalse(self.window.index_thread.is_alive())
+        self.window.rescan_if_stale()  # back in the app, but it only just opened
+        self.assertIsNone(self.window.index_thread)
         self.window.last_scan_finished -= AUTO_RESCAN_SECONDS
         self.window.rescan_if_stale()
         self.wait_until(lambda: self.shown() == {"first.jpg", "second.jpg"})
 
     def test_unplugged_drive_does_not_interrupt_with_a_dialog(self):
         APP.processEvents()
-        self.wait_until(lambda: self.window.last_scan_finished is not None)
         self.library.rename(self.unplugged)
         self.window.last_scan_finished -= AUTO_RESCAN_SECONDS
         finished = self.window.last_scan_finished
@@ -107,7 +106,6 @@ class UnpluggedAtLaunchTests(WindowTestCase):
 
     def test_library_comes_back_when_the_drive_does(self):
         APP.processEvents()
-        self.wait_until(lambda: self.window.last_scan_finished is not None)
         self.wait_until(lambda: self.window.gallery.empty.title_label.text() == "Library folder unavailable")
         self.assertEqual(self.window.root_folder, self.library, "the saved folder must not be forgotten")
         self.assertEqual(self.errors, [])

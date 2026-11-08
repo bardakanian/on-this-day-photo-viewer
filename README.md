@@ -21,7 +21,8 @@ generation, search, and library analytics all stay on your computer.
   in the background, and scans read capture dates in parallel.
 - Draws the gallery as a virtual grid: only cards on screen are drawn and load thumbnails,
   so a day with thousands of items scrolls as smoothly as a day with ten.
-- Keeps itself current: the library is re-checked at launch and when you return to the app.
+- Opens straight to the saved index, and re-checks the library when you return to the app
+  after 10 minutes.
 - Includes a searchable, sortable library of every indexed video.
 - Calculates folder-specific Library Insights from the existing SQLite index.
 - Opens photos and videos in a full-window viewer with zoom, pan, and in-app video
@@ -175,7 +176,7 @@ open it the first time with right-click > **Open** (or System Settings > Privacy
 ### Browse the daily gallery
 
 - Use **Choose Folder** to select or change the active media library.
-- The library refreshes itself at launch and when you return to the app; use **Rescan**
+- The library refreshes itself when you return to the app after 10 minutes; use **Rescan**
   to check right away after adding, moving, editing, or removing files.
 - Use the arrow controls to browse adjacent dates or **Today** to return to the
   current date.
