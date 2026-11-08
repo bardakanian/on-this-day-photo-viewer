@@ -151,6 +151,9 @@ class UnpluggedBrowsingTests(IsolatedAppData):
         for thread in (self.window.index_thread, self.window.preview_thread):
             if thread:
                 thread.join(10)
+        # Queries still running would hold the temporary database open, which Windows won't delete.
+        self.window.gallery_pool.waitForDone(10000)
+        self.window.analytics_pool.waitForDone(10000)
         super().tearDown()
 
     def wait_until(self, condition, timeout: float = 15) -> None:

@@ -590,7 +590,7 @@ class MainWindow(QMainWindow):
         self.preview_stop.set()
 
     def _handle_preview_event(self, event: dict) -> None:
-        if event["stop"] is not self.preview_stop or self.scan_running():
+        if event["stop"].is_set() or self.scan_running():
             return  # from a run that was stopped, or a scan is showing its own progress
         if "result" in event:
             result = event["result"]
