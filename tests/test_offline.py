@@ -162,6 +162,7 @@ class UnpluggedBrowsingTests(IsolatedAppData):
 
     def test_gallery_and_viewer_use_saved_previews(self):
         APP.processEvents()
+        self.window.start_indexing()
         self.wait_until(lambda: len(self.window.gallery.records) == 1)
         record = self.window.gallery.records[0]
         saved = media.thumbnail_cache_path(record.path, record.file_size, record.modified_ns)

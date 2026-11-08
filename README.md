@@ -21,9 +21,10 @@ generation, search, and library analytics all stay on your computer.
   in the background, and scans read capture dates in parallel.
 - Draws the gallery as a virtual grid: only cards on screen are drawn and load thumbnails,
   so a day with thousands of items scrolls as smoothly as a day with ten.
-- Keeps itself current: the library is re-checked at launch and when you return to the app.
+- Opens straight to the saved index, and re-checks the library when you return to the app
+  after 10 minutes.
 - Browses the library while its drive is disconnected, using a preview of every item saved
-  in the background after each scan.
+  in the background.
 - Includes a searchable, sortable library of every indexed video.
 - Calculates folder-specific Library Insights from the existing SQLite index.
 - Opens photos and videos in a full-window viewer with zoom, pan, and in-app video
@@ -69,11 +70,11 @@ Search and sort indexed videos without leaving the desktop app.
    entries (and cached thumbnails) for files that are no longer present. If the
    folder is unavailable, such as an unplugged drive, or contains no media at all,
    the scan leaves the existing index untouched.
-5. The library is checked again each time the app starts, and when you come back to
-   the app after 10 minutes or more, so new photos appear without a manual rescan. If the
+5. The library is checked again when you come back to the app after 10 minutes or more,
+   or when you choose **Rescan**. Opening the app shows the saved index without scanning. If the
    library's drive isn't connected, the gallery keeps the folder and shows the photos again
    as soon as the drive is back.
-6. After each scan, a preview of every item is saved in the background, starting with the
+6. When the app opens and after each scan, a preview of every item is saved in the background, starting with the
    calendar days coming up soonest; the status bar shows the progress. With the previews
    saved, the gallery works while the library's drive is disconnected: it shows every
    indexed item with its saved preview, and the viewer shows the preview, enlarged to fit,
@@ -185,7 +186,7 @@ open it the first time with right-click > **Open** (or System Settings > Privacy
 ### Browse the daily gallery
 
 - Use **Choose Folder** to select or change the active media library.
-- The library refreshes itself at launch and when you return to the app; use **Rescan**
+- The library refreshes itself when you return to the app after 10 minutes; use **Rescan**
   to check right away after adding, moving, editing, or removing files.
 - Use the arrow controls to browse adjacent dates or **Today** to return to the
   current date.

@@ -104,15 +104,16 @@ class MainWindow(QMainWindow):
         self.stop_event = threading.Event()
         self.active_scan_id = 0
         self.pending_index_start = False
-        # Scans started by the app itself (at launch, on return) stay quiet about an unplugged drive.
+        # Scans started by the app itself (on return) stay quiet about an unplugged drive.
         self.scan_is_automatic = False
-        self.last_scan_finished: float | None = None
+        # Starts at launch, so returning to the app re-checks the library only after a real while.
+        self.last_scan_finished = time.monotonic()
         self.library_unavailable = False
         self.preview_events = PreviewEvents()
         self.preview_events.received.connect(self._handle_preview_event)
         self.preview_stop = threading.Event()
         self.preview_thread: threading.Thread | None = None
-        self.ready_text = ""  # the status line after a scan, which preview progress is added to
+        self.ready_text = "Ready"  # the status line after a scan, which preview progress is added to
         self.index_events = IndexEvents()
         self.index_events.received.connect(self._handle_index_event)
         self.analytics_events = AnalyticsEvents()
@@ -284,8 +285,7 @@ class MainWindow(QMainWindow):
         self.refresh_gallery()
         if self.root_folder:
             self._load_insights()
-            # Pick up photos added since the last session. Unchanged files are only stat'ed, so this is quick.
-            self.start_indexing(automatic=True)
+            self.start_saving_previews()  # carry on from last time; there's no scan at launch to start it
         missing = []
         if not HEIC_ENABLED:
             missing.append("HEIC image support")
@@ -631,8 +631,6 @@ class MainWindow(QMainWindow):
 
     def rescan_if_stale(self) -> None:
         """Re-check the library when returning to the app, at most every AUTO_RESCAN_SECONDS."""
-        if self.last_scan_finished is None:
-            return  # the launch scan is still running
         # While the library is unavailable, every return checks whether its drive is back. The check
         # runs on the scan's thread, since a disconnected network share can take a while to answer.
         if self.library_unavailable or time.monotonic() - self.last_scan_finished >= AUTO_RESCAN_SECONDS:
