@@ -1,3 +1,4 @@
+from datetime import datetime
 from pathlib import Path
 
 from PySide6.QtCore import QAbstractTableModel, QModelIndex, QSortFilterProxyModel, Qt, Signal
@@ -6,7 +7,12 @@ from PySide6.QtWidgets import (
 )
 
 from ...core.models import VideoRecord
+from ...core.timeformat import DEFAULT_TIME_FORMAT, format_time
 from ..widgets.common import EmptyState, PageHeader, SearchBox
+
+
+SORT_ROLE = Qt.ItemDataRole.UserRole + 1
+CAPTURED_COLUMN = 2
 
 
 class VideoTableModel(QAbstractTableModel):
@@ -15,6 +21,7 @@ class VideoTableModel(QAbstractTableModel):
     def __init__(self, rows: list[VideoRecord] | None = None, parent=None):
         super().__init__(parent)
         self.rows = rows or []
+        self.time_format = DEFAULT_TIME_FORMAT
 
     def rowCount(self, parent=QModelIndex()) -> int:
         return 0 if parent.isValid() else len(self.rows)
@@ -35,15 +42,34 @@ class VideoTableModel(QAbstractTableModel):
             values = (
                 record.path.name,
                 record.path.suffix.lstrip(".").upper(),
-                record.capture_ts.replace("T", "  ") if record.capture_ts else "Date unavailable",
+                self._captured_text(record),
                 str(record.path.parent),
             )
             return values[index.column()]
         if role == Qt.ItemDataRole.UserRole:
             return str(record.path)
+        if role == SORT_ROLE:
+            # Sort on the stored timestamp: "10:00 AM" must not come before "2:00 AM".
+            if index.column() == CAPTURED_COLUMN:
+                return record.capture_ts or ""
+            return self.data(index)
         if role == Qt.ItemDataRole.TextAlignmentRole and index.column() == 1:
             return int(Qt.AlignmentFlag.AlignCenter)
         return None
+
+    def _captured_text(self, record: VideoRecord) -> str:
+        if not record.capture_ts:
+            return "Date unavailable"
+        try:
+            captured = datetime.fromisoformat(record.capture_ts)
+        except ValueError:
+            return record.capture_ts.replace("T", "  ")
+        return f"{captured:%Y-%m-%d}  {format_time(captured, self.time_format, seconds=True)}"
+
+    def set_time_format(self, time_format: str) -> None:
+        self.time_format = time_format
+        if self.rows:
+            self.dataChanged.emit(self.index(0, CAPTURED_COLUMN), self.index(len(self.rows) - 1, CAPTURED_COLUMN))
 
     def replace(self, rows: list[VideoRecord]) -> None:
         self.beginResetModel()
@@ -93,6 +119,7 @@ class VideosPage(QWidget):
         self.proxy = VideoFilterModel(self)
         self.proxy.setSourceModel(self.model)
         self.proxy.setFilterCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+        self.proxy.setSortRole(SORT_ROLE)
         self.table = QTableView()
         self.table.setModel(self.proxy)
         self.table.setSortingEnabled(True)
@@ -118,6 +145,9 @@ class VideosPage(QWidget):
         self.results.addWidget(self.empty)
         layout.addWidget(self.results, 1)
         self.search.textChanged.connect(self._filter)
+
+    def set_time_format(self, time_format: str) -> None:
+        self.model.set_time_format(time_format)
 
     def set_records(self, rows: list[VideoRecord]) -> None:
         self.model.replace(rows)

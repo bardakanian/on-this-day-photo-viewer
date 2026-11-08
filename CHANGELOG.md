@@ -2,6 +2,10 @@
 
 With every change, bump `VERSION` in `onthisday/core/constants.py` and add an entry here.
 
+## 1.9.0 — 2026-11-08
+
+- Times show on a 12-hour clock (2:05 PM) in the viewer, its Info panel, the gallery, and the Video Library. **Settings > Time format** switches back to 24-hour (14:05).
+
 ## 1.7.0 — 2026-11-02
 
 - The library refreshes itself: at launch, and when you return to the app after 10 minutes. Scans that find nothing new leave the gallery as it is.

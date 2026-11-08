@@ -9,6 +9,7 @@ from ...core.gallery_layout import CARD_WIDTH, Cell, GalleryLayout, layout_secti
 from ...core.media import get_cached_thumbnail, legacy_thumbnail_cache_path, thumbnail_cache_path
 from ...core.models import MediaRecord
 from ...core.workqueue import WorkQueue
+from ...core.timeformat import DEFAULT_TIME_FORMAT, format_capture
 from ..theme.colors import LIGHT, Palette
 from ..theme.metrics import Metrics
 from ..theme.typography import Typography
@@ -115,6 +116,7 @@ class GalleryGrid(QAbstractScrollArea):
         self.viewport().setMouseTracking(True)
         self.verticalScrollBar().setSingleStep(48)
         self.colors: Palette = LIGHT
+        self.time_format = DEFAULT_TIME_FORMAT
         self.root_folder: Path | None = None
         self.sections: list[tuple[int, list[MediaRecord]]] = []
         self.collapsed: set[int] = set()
@@ -148,6 +150,10 @@ class GalleryGrid(QAbstractScrollArea):
 
     def set_colors(self, colors: Palette) -> None:
         self.colors = colors
+        self.viewport().update()
+
+    def set_time_format(self, time_format: str) -> None:
+        self.time_format = time_format
         self.viewport().update()
 
     def toggle_section(self, year: int) -> None:
@@ -260,7 +266,7 @@ class GalleryGrid(QAbstractScrollArea):
         painter.setPen(QColor(c.text_subtle))
         kind = "VIDEO" if record.is_video else "PHOTO"
         painter.drawText(DATE_LINE.translated(cell.x, cell.y), Qt.AlignmentFlag.AlignVCenter,
-                         f"{kind}  ·  {record.captured_at:%B %d, %Y  •  %H:%M}")
+                         f"{kind}  ·  {format_capture(record.captured_at, self.time_format)}")
 
         painter.setFont(self._body_font)
         painter.setPen(QColor(c.text))

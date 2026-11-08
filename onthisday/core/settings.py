@@ -3,12 +3,14 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .constants import APP_DIR, CONFIG_FILE, THUMBNAIL_DIR
+from .timeformat import DEFAULT_TIME_FORMAT, TIME_FORMATS
 
 
 @dataclass(slots=True)
 class AppSettings:
     photo_folder: Path | None = None
     theme: str = "system"
+    time_format: str = DEFAULT_TIME_FORMAT
 
 
 class SettingsStore:
@@ -31,7 +33,10 @@ class SettingsStore:
         theme = data.get("theme", "system")
         if theme not in {"system", "light", "dark"}:
             theme = "system"
-        return AppSettings(folder, theme)
+        time_format = data.get("time_format", DEFAULT_TIME_FORMAT)
+        if time_format not in TIME_FORMATS:
+            time_format = DEFAULT_TIME_FORMAT
+        return AppSettings(folder, theme, time_format)
 
     def save(self, settings: AppSettings) -> None:
         APP_DIR.mkdir(parents=True, exist_ok=True)
@@ -45,5 +50,6 @@ class SettingsStore:
         existing.update({
             "photo_folder": str(settings.photo_folder) if settings.photo_folder else "",
             "theme": settings.theme,
+            "time_format": settings.time_format,
         })
         CONFIG_FILE.write_text(json.dumps(existing, indent=2), encoding="utf-8")

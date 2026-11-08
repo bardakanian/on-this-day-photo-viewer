@@ -1,8 +1,10 @@
 from PySide6.QtWidgets import QComboBox, QDialog, QDialogButtonBox, QFormLayout, QLabel, QVBoxLayout
 
+from ..core.timeformat import TIME_12_HOUR, TIME_24_HOUR
+
 
 class PreferencesDialog(QDialog):
-    def __init__(self, current_theme: str, parent=None):
+    def __init__(self, current_theme: str, current_time_format: str, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Settings")
         self.setModal(True)
@@ -26,6 +28,17 @@ class PreferencesDialog(QDialog):
         note.setProperty("muted", True)
         note.setWordWrap(True)
         layout.addWidget(note)
+        date_heading = QLabel("Date and Time")
+        date_heading.setProperty("role", "section")
+        layout.addWidget(date_heading)
+        date_form = QFormLayout()
+        date_form.setSpacing(12)
+        self.time_format = QComboBox()
+        self.time_format.addItem("12-hour (2:05 PM)", TIME_12_HOUR)
+        self.time_format.addItem("24-hour (14:05)", TIME_24_HOUR)
+        self.time_format.setCurrentIndex(max(0, self.time_format.findData(current_time_format)))
+        date_form.addRow("Time format", self.time_format)
+        layout.addLayout(date_form)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Cancel | QDialogButtonBox.StandardButton.Save)
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
@@ -34,3 +47,7 @@ class PreferencesDialog(QDialog):
     @property
     def selected_theme(self) -> str:
         return self.theme.currentData()
+
+    @property
+    def selected_time_format(self) -> str:
+        return self.time_format.currentData()

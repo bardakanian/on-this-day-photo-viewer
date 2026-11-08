@@ -57,7 +57,7 @@ class FormattingTests(unittest.TestCase):
         info = MediaMetadata(Path("/Pictures/IMG_1.jpg"), "image", 2_400_000, "JPEG", (4032, 3024),
                              datetime(2015, 7, 4, 9, 5), media.DATE_EMBEDDED)
         self.assertEqual(metadata_rows(info), [
-            ("Date taken", "July 4, 2015  •  09:05"),
+            ("Date taken", "July 4, 2015  •  9:05 AM"),
             ("Date from", "Photo metadata (EXIF)"),
             ("Dimensions", "4,032 × 3,024  (12.2 MP)"),
             ("Type", "JPEG image"),

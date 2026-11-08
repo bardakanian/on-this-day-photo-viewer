@@ -226,6 +226,7 @@ class MainWindow(QMainWindow):
         self.folder_status.setProperty("subtle", True)
         self.folder_status.setMaximumWidth(440)
         self.statusBar().addPermanentWidget(self.folder_status)
+        self._apply_time_format()
 
     def _build_menus(self) -> None:
         file_menu = self.menuBar().addMenu("File")
@@ -398,6 +399,11 @@ class MainWindow(QMainWindow):
         self.media_filter = value
         self.refresh_gallery()
 
+    def _apply_time_format(self) -> None:
+        self.gallery.set_time_format(self.settings.time_format)
+        self.videos.set_time_format(self.settings.time_format)
+        self.viewer.set_time_format(self.settings.time_format)
+
     def _theme_changed(self, _preference: str) -> None:
         self.insights.set_theme_colors(self.theme.colors)
         self.gallery.set_theme_colors(self.theme.colors)
@@ -552,15 +558,17 @@ class MainWindow(QMainWindow):
         return True
 
     def show_preferences(self) -> None:
-        dialog = PreferencesDialog(self.settings.theme, self)
+        dialog = PreferencesDialog(self.settings.theme, self.settings.time_format, self)
         if dialog.exec():
             self.settings.theme = dialog.selected_theme
             self.theme.apply(self.settings.theme)
+            self.settings.time_format = dialog.selected_time_format
+            self._apply_time_format()
             try:
                 self.settings_store.save(self.settings)
             except OSError:
-                LOGGER.exception("Could not save appearance preference")
-                self._error("Settings could not be saved", "The appearance changed for this session but may not be remembered.")
+                LOGGER.exception("Could not save preferences")
+                self._error("Settings could not be saved", "Your changes apply for this session but may not be remembered.")
 
     def _error(self, title: str, message: str) -> None:
         QMessageBox.critical(self, title, message)

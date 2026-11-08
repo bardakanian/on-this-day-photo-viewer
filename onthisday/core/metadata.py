@@ -9,6 +9,7 @@ from pathlib import Path
 from PIL import Image
 
 from . import media
+from .timeformat import DEFAULT_TIME_FORMAT, format_capture
 
 _DATE_SOURCES = {
     media.DATE_SPOTLIGHT: "Spotlight (macOS)",
@@ -138,20 +139,16 @@ def format_frame_rate(rate: float) -> str:
     return f"{rate:.0f} fps" if abs(rate - round(rate)) < 0.005 else f"{rate:.2f} fps"
 
 
-def format_date(value: datetime) -> str:
-    return f"{value:%B} {value.day}, {value:%Y  •  %H:%M}"
-
-
 def date_source_label(metadata: MediaMetadata) -> str | None:
     if metadata.date_source == media.DATE_EMBEDDED:
         return "Video metadata" if metadata.is_video else "Photo metadata (EXIF)"
     return _DATE_SOURCES.get(metadata.date_source)
 
 
-def metadata_rows(metadata: MediaMetadata) -> list[tuple[str, str]]:
+def metadata_rows(metadata: MediaMetadata, time_format: str = DEFAULT_TIME_FORMAT) -> list[tuple[str, str]]:
     """(label, value) pairs for the Info panel, in display order; unknown values are left out."""
     rows = [("Date recorded" if metadata.is_video else "Date taken",
-             format_date(metadata.captured_at) if metadata.captured_at else "Unknown")]
+             format_capture(metadata.captured_at, time_format) if metadata.captured_at else "Unknown")]
     source = date_source_label(metadata)
     if source:
         rows.append(("Date from", source))
