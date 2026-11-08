@@ -2,6 +2,10 @@
 
 With every change, bump `VERSION` in `onthisday/core/constants.py` and add an entry here.
 
+## 1.9.1 — 2026-11-08
+
+- The app no longer scans the library every time it opens; it shows the saved index right away. Use **Rescan** to pick up new files at any time. The library is still re-checked when you return to the app after 10 minutes.
+
 ## 1.7.0 — 2026-11-02
 
 - The library refreshes itself: at launch, and when you return to the app after 10 minutes. Scans that find nothing new leave the gallery as it is.
