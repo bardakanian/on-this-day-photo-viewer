@@ -14,7 +14,7 @@ from PySide6.QtWidgets import (
 from ..core.constants import APP_NAME, AUTO_RESCAN_SECONDS, VERSION
 from ..core.database import MediaRepository
 from ..core.indexer import MediaIndexer
-from ..core.media import FFMPEG_ENABLED, HEIC_ENABLED, open_in_default_app, thumbnail_cache_files
+from ..core.media import FFMPEG_ENABLED, HEIC_ENABLED, is_read_only_folder, open_in_default_app, thumbnail_cache_files
 from ..core.models import MediaRecord, VideoRecord, ViewerItem
 from ..core.settings import SettingsStore
 from ..core.thumbnail_warmer import in_preview_order, warm_thumbnails
@@ -81,6 +81,7 @@ class GalleryLoadTask(QRunnable):
         try:
             # A drive that isn't connected: show what the index knows, with the previews saved earlier.
             event["unavailable"] = not self.folder.is_dir()
+            event["read_only"] = is_read_only_folder(self.folder)
             event["records"] = self.repository.matches_for_date(
                 self.folder, self.selected_date, self.media_filter, check_files=not event["unavailable"])
         except Exception as exc:
@@ -109,6 +110,7 @@ class MainWindow(QMainWindow):
         # Starts at launch, so returning to the app re-checks the library only after a real while.
         self.last_scan_finished = time.monotonic()
         self.library_unavailable = False
+        self.library_read_only = False
         self.preview_events = PreviewEvents()
         self.preview_events.received.connect(self._handle_preview_event)
         self.preview_stop = threading.Event()
@@ -399,11 +401,13 @@ class MainWindow(QMainWindow):
         if event.get("request_id") != self.gallery_request_id or event.get("folder") != self.root_folder:
             return
         self.library_unavailable = bool(event.get("unavailable"))
+        self.library_read_only = bool(event.get("read_only"))
         records = event.get("records", [])
         if "error" in event:
             LOGGER.error("Could not query gallery records: %s", event["error"])
             self._error("Unable to load your library", "The media index could not be read. Try rescanning the library.")
-        self.gallery.show_records(records, event["date"], event["filter"], event["folder"], offline=self.library_unavailable)
+        self.gallery.show_records(records, event["date"], event["filter"], event["folder"],
+                                  offline=self.library_unavailable, read_only=self.library_read_only)
 
     def _filter_changed(self, value: str) -> None:
         self.media_filter = value
@@ -428,7 +432,7 @@ class MainWindow(QMainWindow):
         if current is not self.viewer:
             self._viewer_return = current
         self.stack.setCurrentWidget(self.viewer)
-        self.viewer.set_offline(self.library_unavailable)
+        self.viewer.set_offline(self.library_unavailable, self.library_read_only)
         self.viewer.show_items(items, index)
 
     def _open_from_gallery(self, record: MediaRecord) -> None:

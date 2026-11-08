@@ -2,6 +2,7 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QKeySequence, QPixmap, QShortcut
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QStackedWidget, QVBoxLayout, QWidget
 
+from ...core.media import read_only_trash_reason
 from ...core.metadata import MediaMetadata, metadata_rows
 from ...core.models import ViewerItem
 from ..viewer_images import PLACEHOLDER, ViewerImageLoader
@@ -39,6 +40,7 @@ class ViewerPage(QWidget):
         self._original_failed = False
         self._placeholder_done = False
         self.offline = False  # the library's drive is disconnected: saved previews only
+        self.read_only = False  # the library's drive can't be changed: nothing can be moved to the Trash
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -154,15 +156,18 @@ class ViewerPage(QWidget):
     def current_item(self) -> ViewerItem | None:
         return self.items[self.index] if 0 <= self.index < len(self.items) else None
 
-    def set_offline(self, offline: bool) -> None:
+    def set_offline(self, offline: bool, read_only: bool = False) -> None:
         """While the library's drive is disconnected, photos show their saved preview and files can't
         be opened elsewhere or moved to the Trash."""
         self.offline = offline
+        self.read_only = read_only
         for button in (self.open_button, self.trash_button):
             button.setEnabled(not offline)
         reason = "The library's drive isn't connected"
         self.open_button.setToolTip(reason if offline else "Open in the default app")
-        self.trash_button.setToolTip(reason if offline else f"Move to Trash ({native_keys('Ctrl+Backspace')})")
+        self.trash_button.setEnabled(not offline and not read_only)
+        self.trash_button.setToolTip(reason if offline else read_only_trash_reason() if read_only
+                                     else f"Move to Trash ({native_keys('Ctrl+Backspace')})")
 
     def show_items(self, items: list[ViewerItem], index: int) -> None:
         self.items = items
@@ -365,7 +370,7 @@ class ViewerPage(QWidget):
             self.open_externally_requested.emit(self.current_item)
 
     def _trash_current(self) -> None:
-        if self.current_item is not None and not self.offline:
+        if self.current_item is not None and not self.offline and not self.read_only:
             # Release the file before it is moved.
             self.stop()
             self.trash_requested.emit(self.current_item)

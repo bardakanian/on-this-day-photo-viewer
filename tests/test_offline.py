@@ -11,6 +11,7 @@ import time
 import unittest
 from datetime import date, datetime
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from PIL import Image
@@ -132,6 +133,17 @@ class OfflineQueryTests(IsolatedAppData):
         rows = dict(metadata_rows(unreadable, datetime(2019, 5, 1, 9, 30)))
         self.assertEqual(rows["Date taken"], "May 1, 2019  •  09:30")
         self.assertEqual(rows["Date from"], "Library index (file not available)")
+
+
+@unittest.skipUnless(hasattr(os, "statvfs"), "os.statvfs doesn't exist on Windows")
+class ReadOnlyDriveTests(unittest.TestCase):
+    def test_read_only_flag_is_read_from_the_mount(self):
+        for flags, expected in ((os.ST_RDONLY, True), (0, False)):
+            with patch.object(media.os, "statvfs", return_value=SimpleNamespace(f_flag=flags)):
+                self.assertEqual(media.is_read_only_folder(Path("/Volumes/Photos")), expected)
+
+    def test_missing_folder_is_not_called_read_only(self):
+        self.assertFalse(media.is_read_only_folder(Path("/no/such/folder")))
 
 
 class UnpluggedBrowsingTests(IsolatedAppData):

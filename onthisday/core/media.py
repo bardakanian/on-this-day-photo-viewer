@@ -384,6 +384,21 @@ def get_cached_thumbnail(path: Path, media_type: str, file_size: int, modified_n
         return None
 
 
+def is_read_only_folder(path: Path) -> bool:
+    """True when the folder's drive is mounted read-only, as macOS mounts NTFS drives."""
+    if not hasattr(os, "statvfs"):  # Windows
+        return False
+    try:
+        return bool(os.statvfs(path).f_flag & os.ST_RDONLY)
+    except OSError:
+        return False
+
+
+def read_only_trash_reason() -> str:
+    reason = "This drive is read-only on this computer, so files on it can't be moved to the Trash."
+    return f"{reason} macOS can read NTFS drives but can't change them." if sys.platform == "darwin" else reason
+
+
 def open_in_default_app(path: Path) -> tuple[bool, str | None]:
     try:
         if sys.platform == "darwin":

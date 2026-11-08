@@ -2,7 +2,7 @@ from pathlib import Path
 
 APP_NAME = "On This Day"
 # The one place the version lives. Bump it with every change and add a CHANGELOG.md entry.
-VERSION = "1.10.0"
+VERSION = "1.10.1"
 APP_DIR = Path.home() / ".on_this_day_photo_viewer"
 CONFIG_FILE = APP_DIR / "config.json"
 DB_FILE = APP_DIR / "photo_index.sqlite3"

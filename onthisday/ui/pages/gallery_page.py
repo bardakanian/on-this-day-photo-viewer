@@ -55,7 +55,7 @@ class GalleryPage(QWidget):
         self.grid.shutdown()
 
     def show_records(self, records: list[MediaRecord], selected_date: date, media_filter: str, folder: Path | None,
-                     offline: bool = False) -> None:
+                     offline: bool = False, read_only: bool = False) -> None:
         """Show one day's items. `offline`: the library's drive is disconnected, so the items come from
         the index and show their saved previews."""
         self.cancel_pending()
@@ -98,6 +98,6 @@ class GalleryPage(QWidget):
         sections = [(year, grouped[year]) for year in sorted(grouped, reverse=True)]
         for _, items in sections:
             self.records.extend(items)
-        self.grid.set_sections(sections, folder, collapsed, offline)
+        self.grid.set_sections(sections, folder, collapsed, offline, read_only)
         self.results.setCurrentIndex(0)
         self.grid.verticalScrollBar().setValue(scroll)
