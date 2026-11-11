@@ -32,7 +32,32 @@ def quiet_qt_logging() -> None:
     )
 
 
+def preload_ffmpeg_dlls() -> None:
+    """Load PySide6's FFmpeg DLLs by full path so Qt's FFmpeg media plugin can find them.
+
+    Qt's plugin finds them through PATH, which Windows ignores for packaged apps such as the
+    Microsoft Store Python. The plugin then fails to load and Qt silently falls back to Windows
+    Media Foundation, which can't play many videos ("Media session serious error."). Once a DLL
+    is loaded, Windows reuses it for any later lookup by the same name."""
+    if sys.platform != "win32":
+        return
+    import ctypes
+    from pathlib import Path
+
+    import PySide6
+
+    package_dir = Path(PySide6.__file__).resolve().parent
+    # Dependencies before the DLLs that import them.
+    for prefix in ("avutil", "swresample", "swscale", "avcodec", "avformat"):
+        for dll in package_dir.glob(f"{prefix}-*.dll"):
+            try:
+                ctypes.WinDLL(str(dll))
+            except OSError:
+                logging.getLogger(__name__).warning("Could not preload %s", dll.name, exc_info=True)
+
+
 def main() -> int:
+    preload_ffmpeg_dlls()
     quiet_qt_logging()
     QCoreApplication.setOrganizationName(APP_NAME)
     QCoreApplication.setApplicationName(APP_NAME)
