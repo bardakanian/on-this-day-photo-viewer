@@ -2,6 +2,12 @@
 
 With every change, bump `VERSION` in `onthisday/core/constants.py` and add an entry here.
 
+## 1.10.3 — 2026-11-12
+
+- Fixed the window freezing for up to two seconds. The stall log showed the whole theme being re-applied again and again while the app was open; it is now redone only when light or dark really changes, and Settings no longer restyles the app when you save without changing the theme.
+- The gallery no longer asks the file system for the library's path every time it draws a card, which cost about a third of a second per redraw on Windows.
+- The log file is written in UTF-8, so file names and the "·" in log lines are no longer garbled.
+
 ## 1.10.2 — 2026-11-12
 
 - The app now writes a line to its log whenever the window stops responding for more than 0.2 seconds, with how long it lasted, what the app was doing (page, scan, saving previews) and where in the code it was stuck. This is to find the cause of stutter. It looks at a stall only after it ends, adds no delay, and keeps at most 300 entries per session.
