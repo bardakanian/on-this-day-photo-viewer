@@ -47,6 +47,9 @@ class GalleryPage(QWidget):
     def set_theme_colors(self, colors: Palette) -> None:
         self.grid.set_colors(colors)
 
+    def set_time_format(self, time_format: str) -> None:
+        self.grid.set_time_format(time_format)
+
     def cancel_pending(self) -> None:
         """Drop queued thumbnail work; running jobs just finish."""
         self.grid.loader.clear()

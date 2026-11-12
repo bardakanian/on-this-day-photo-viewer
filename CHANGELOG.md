@@ -2,6 +2,10 @@
 
 With every change, bump `VERSION` in `onthisday/core/constants.py` and add an entry here.
 
+## 1.11.0 — 2026-11-12
+
+- Times show on a 12-hour clock (2:05 PM) in the viewer, its Info panel, the gallery, and the Video Library. **Settings > Time format** switches back to 24-hour (14:05).
+
 ## 1.10.3 — 2026-11-12
 
 - Fixed the window freezing for up to two seconds. The stall log showed the whole theme being re-applied again and again while the app was open; it is now redone only when light or dark really changes, and Settings no longer restyles the app when you save without changing the theme.

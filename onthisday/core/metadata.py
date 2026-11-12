@@ -9,6 +9,7 @@ from pathlib import Path
 from PIL import Image
 
 from . import media
+from .timeformat import DEFAULT_TIME_FORMAT, format_capture
 
 _DATE_SOURCES = {
     media.DATE_SPOTLIGHT: "Spotlight (macOS)",
@@ -138,17 +139,14 @@ def format_frame_rate(rate: float) -> str:
     return f"{rate:.0f} fps" if abs(rate - round(rate)) < 0.005 else f"{rate:.2f} fps"
 
 
-def format_date(value: datetime) -> str:
-    return f"{value:%B} {value.day}, {value:%Y  •  %H:%M}"
-
-
 def date_source_label(metadata: MediaMetadata) -> str | None:
     if metadata.date_source == media.DATE_EMBEDDED:
         return "Video metadata" if metadata.is_video else "Photo metadata (EXIF)"
     return _DATE_SOURCES.get(metadata.date_source)
 
 
-def metadata_rows(metadata: MediaMetadata, indexed_date: datetime | None = None) -> list[tuple[str, str]]:
+def metadata_rows(metadata: MediaMetadata, indexed_date: datetime | None = None,
+                  time_format: str = DEFAULT_TIME_FORMAT) -> list[tuple[str, str]]:
     """(label, value) pairs for the Info panel, in display order; unknown values are left out.
 
     `indexed_date` is the date the library index has for the item; it's shown when the file
@@ -156,7 +154,7 @@ def metadata_rows(metadata: MediaMetadata, indexed_date: datetime | None = None)
     """
     captured_at = metadata.captured_at or indexed_date
     rows = [("Date recorded" if metadata.is_video else "Date taken",
-             format_date(captured_at) if captured_at else "Unknown")]
+             format_capture(captured_at, time_format) if captured_at else "Unknown")]
     source = date_source_label(metadata)
     if metadata.captured_at is None and indexed_date is not None:
         source = "Library index (file not available)"

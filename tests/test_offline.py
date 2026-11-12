@@ -131,7 +131,7 @@ class OfflineQueryTests(IsolatedAppData):
     def test_info_panel_falls_back_to_the_indexed_date(self):
         unreadable = MediaMetadata(Path("/Volumes/Gone/a.jpg"), "image", None, None, None, None, None)
         rows = dict(metadata_rows(unreadable, datetime(2019, 5, 1, 9, 30)))
-        self.assertEqual(rows["Date taken"], "May 1, 2019  •  09:30")
+        self.assertEqual(rows["Date taken"], "May 1, 2019  •  9:30 AM")
         self.assertEqual(rows["Date from"], "Library index (file not available)")
 
 

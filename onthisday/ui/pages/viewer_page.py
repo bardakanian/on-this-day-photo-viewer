@@ -4,6 +4,7 @@ from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QStacked
 
 from ...core.media import read_only_trash_reason
 from ...core.metadata import MediaMetadata, metadata_rows
+from ...core.timeformat import DEFAULT_TIME_FORMAT, format_capture
 from ...core.models import ViewerItem
 from ..viewer_images import PLACEHOLDER, ViewerImageLoader
 from ..viewer_metadata import ViewerMetadataLoader
@@ -33,6 +34,7 @@ class ViewerPage(QWidget):
         self.metadata = ViewerMetadataLoader(self)
         self.metadata.loaded.connect(self._metadata_loaded)
         self.items: list[ViewerItem] = []
+        self.time_format = DEFAULT_TIME_FORMAT
         self.index = 0
         self._full_requested = False
         self._screen_decoded = False
@@ -217,10 +219,16 @@ class ViewerPage(QWidget):
         size = screen.size()
         return int(max(size.width(), size.height()) * screen.devicePixelRatio())
 
+    def set_time_format(self, time_format: str) -> None:
+        self.time_format = time_format
+        if self.current_item is not None:
+            self._update_labels(self.current_item)
+            self._update_info()
+
     def _update_labels(self, item: ViewerItem) -> None:
         self.title.setText(item.path.name)
         self.title.setToolTip(str(item.path))
-        self.subtitle.setText(item.captured_at.strftime("%B %d, %Y  •  %H:%M") if item.captured_at else "Date unavailable")
+        self.subtitle.setText(format_capture(item.captured_at, self.time_format) if item.captured_at else "Date unavailable")
         self.position_label.setText(f"{self.index + 1:,} of {len(self.items):,}")
         self.previous_button.setEnabled(self.index > 0)
         self.next_button.setEnabled(self.index < len(self.items) - 1)
@@ -335,7 +343,7 @@ class ViewerPage(QWidget):
             return  # details are only read while the panel is open
         cached = self.metadata.cached(item)
         if cached is not None:
-            self.info_panel.show_rows(metadata_rows(cached, item.captured_at))
+            self.info_panel.show_rows(metadata_rows(cached, item.captured_at, self.time_format))
         else:
             self.info_panel.show_message("Loading…")
             self.metadata.request(item)
@@ -343,7 +351,7 @@ class ViewerPage(QWidget):
     def _metadata_loaded(self, key, metadata: MediaMetadata) -> None:
         current = self.current_item
         if current is not None and current.key == key and not self.info_panel.isHidden():
-            self.info_panel.show_rows(metadata_rows(metadata, current.captured_at))
+            self.info_panel.show_rows(metadata_rows(metadata, current.captured_at, self.time_format))
 
     def _request_full_resolution(self) -> None:
         item = self.current_item

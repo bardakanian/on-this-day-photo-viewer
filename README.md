@@ -30,6 +30,7 @@ generation, search, and library analytics all stay on your computer.
 - Opens photos and videos in a full-window viewer with zoom, pan, and in-app video
   playback. Any item can still be opened in its default application.
 - Supports system, light, and dark appearance modes.
+- Shows times on a 12-hour or 24-hour clock, chosen in Settings.
 - Moves an item to the operating system's Trash only after explicit confirmation.
 - Preserves the existing app settings, media index, and compatible thumbnail cache.
 
