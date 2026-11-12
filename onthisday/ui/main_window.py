@@ -17,6 +17,7 @@ from ..core.indexer import MediaIndexer
 from ..core.media import FFMPEG_ENABLED, HEIC_ENABLED, is_read_only_folder, open_in_default_app, thumbnail_cache_files
 from ..core.models import MediaRecord, VideoRecord, ViewerItem
 from ..core.settings import SettingsStore
+from ..core.stallwatch import StallWatchdog
 from ..core.thumbnail_warmer import in_preview_order, warm_thumbnails
 from .dialogs import PreferencesDialog
 from .pages import GalleryPage, LibraryInsightsPage, VideosPage, ViewerPage
@@ -115,6 +116,7 @@ class MainWindow(QMainWindow):
         self.preview_events.received.connect(self._handle_preview_event)
         self.preview_stop = threading.Event()
         self.preview_thread: threading.Thread | None = None
+        self.stall_watch: StallWatchdog | None = None
         self.ready_text = "Ready"  # the status line after a scan, which preview progress is added to
         self.index_events = IndexEvents()
         self.index_events.received.connect(self._handle_index_event)
@@ -607,6 +609,28 @@ class MainWindow(QMainWindow):
     def scan_running(self) -> bool:
         return bool(self.index_thread and self.index_thread.is_alive())
 
+    def saving_previews(self) -> bool:
+        return bool(self.preview_thread and self.preview_thread.is_alive() and not self.preview_stop.is_set())
+
+    # Slow-event logging --------------------------------------------------------
+
+    def start_stall_watch(self) -> None:
+        """Log (with where the window was stuck) every time it stops responding for a moment."""
+        if self.stall_watch is not None:
+            return
+        self.stall_watch = StallWatchdog(threading.get_ident())
+        self.stall_timer = QTimer(self)
+        self.stall_timer.setInterval(50)
+        self.stall_timer.timeout.connect(lambda: self.stall_watch.beat(self._activity()))
+        self.stall_timer.start()
+        self.stall_watch.start()
+
+    def _activity(self) -> str:
+        """What the app is doing right now, for the stall log. Cheap: it runs 20 times a second."""
+        page = type(self.stack.currentWidget()).__name__
+        return (f"page={page}  scan={'running' if self.scan_running() else 'idle'}"
+                f"  previews={'saving' if self.saving_previews() else 'idle'}")
+
     def show_preferences(self) -> None:
         dialog = PreferencesDialog(self.settings.theme, self.settings.save_previews, self)
         if dialog.exec():
@@ -641,6 +665,9 @@ class MainWindow(QMainWindow):
             self.start_indexing(automatic=True)
 
     def closeEvent(self, event: QCloseEvent) -> None:
+        if self.stall_watch is not None:
+            self.stall_timer.stop()
+            self.stall_watch.stop()
         self.stop_event.set()
         self.stop_saving_previews()
         self.analytics_pool.clear()

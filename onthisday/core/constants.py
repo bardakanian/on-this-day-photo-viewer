@@ -2,7 +2,7 @@ from pathlib import Path
 
 APP_NAME = "On This Day"
 # The one place the version lives. Bump it with every change and add a CHANGELOG.md entry.
-VERSION = "1.10.1"
+VERSION = "1.10.2"
 APP_DIR = Path.home() / ".on_this_day_photo_viewer"
 CONFIG_FILE = APP_DIR / "config.json"
 DB_FILE = APP_DIR / "photo_index.sqlite3"
@@ -30,3 +30,9 @@ BATCH_COMMIT_SIZE = 250
 VIDEO_METADATA_VERSION = 9
 # Coming back to the app re-checks the library for new and removed files once this much time has passed.
 AUTO_RESCAN_SECONDS = 10 * 60
+# The window counts as stalled when it doesn't respond for this long (a few dropped frames).
+STALL_THRESHOLD_SECONDS = 0.2
+# Gaps longer than this are the computer sleeping, not the app stalling.
+MAX_STALL_SECONDS = 30.0
+# Cap on stalls logged per session, so the log can't grow without bound.
+MAX_STALL_REPORTS = 300
