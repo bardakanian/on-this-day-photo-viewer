@@ -57,7 +57,9 @@ class ViewerTestCase(unittest.TestCase):
     """Three photos on disk for a viewer to show."""
 
     def setUp(self):
-        self.temp = tempfile.TemporaryDirectory()
+        # A viewer's decode thread may still be reading a photo when a test ends, and Windows
+        # won't delete a file that is open. Leftover temp files are harmless here.
+        self.temp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         root = Path(self.temp.name)
         self.items = []
         for name, size in (("a.jpg", (4032, 3024)), ("b.jpg", (3000, 2000)), ("c.jpg", (2000, 3000))):

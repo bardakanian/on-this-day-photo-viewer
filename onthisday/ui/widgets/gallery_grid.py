@@ -121,6 +121,9 @@ class GalleryGrid(QAbstractScrollArea):
         self.verticalScrollBar().setSingleStep(48)
         self.colors: Palette = LIGHT
         self.root_folder: Path | None = None
+        # resolve() asks the file system, which is slow on Windows, so it's done once per load
+        # here and not for every card on every repaint.
+        self._root_resolved: Path | None = None
         self.offline = False  # the originals' drive is disconnected: saved previews only, no Trash
         self.read_only = False  # the originals' drive can't be changed: Move to Trash is dimmed
         self.sections: list[tuple[int, list[MediaRecord]]] = []
@@ -155,6 +158,7 @@ class GalleryGrid(QAbstractScrollArea):
         self.offline = offline
         self.sections = sections
         self.root_folder = root_folder
+        self._root_resolved = self._resolve(root_folder)
         self.collapsed = {year for year in (collapsed or set()) if any(year == y for y, _ in sections)}
         self._hover = self._pressed = None
         self._relayout()
@@ -307,10 +311,19 @@ class GalleryGrid(QAbstractScrollArea):
         line = DETAILS_LINE.translated(cell.x, cell.y)
         return QRectF(line.right() + 1 - width, line.top(), width, line.height())
 
+    @staticmethod
+    def _resolve(folder: Path | None) -> Path | None:
+        if folder is None:
+            return None
+        try:
+            return folder.resolve()
+        except OSError:
+            return None
+
     def _folder_text(self, record: MediaRecord) -> str:
         try:
-            relative = record.path.parent.relative_to(self.root_folder.resolve()) if self.root_folder else None
-        except (ValueError, OSError):
+            relative = record.path.parent.relative_to(self._root_resolved) if self._root_resolved else None
+        except ValueError:
             relative = None
         if relative is None:
             return str(record.path.parent)

@@ -15,6 +15,7 @@ def configure_logging() -> None:
         APP_DIR.mkdir(parents=True, exist_ok=True)
         logging.basicConfig(
             filename=APP_DIR / "on_this_day.log",
+            encoding="utf-8",  # the default on Windows is a legacy code page that garbles "·" and file names
             level=logging.INFO,
             format="%(asctime)s %(levelname)s %(name)s: %(message)s",
         )
