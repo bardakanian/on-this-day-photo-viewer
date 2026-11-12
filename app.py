@@ -80,6 +80,7 @@ def main() -> int:
     sys.excepthook = report_exception
     window = MainWindow(app)
     window.show()
+    window.start_stall_watch()
     return app.exec()
 
 

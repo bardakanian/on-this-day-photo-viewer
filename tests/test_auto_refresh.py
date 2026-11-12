@@ -118,6 +118,30 @@ class UnpluggedAtLaunchTests(WindowTestCase):
         self.wait_until(lambda: self.shown() == {"first.jpg"})
 
 
+class StallLoggingTests(WindowTestCase):
+    def pump(self, seconds: float) -> None:
+        end = time.time() + seconds
+        while time.time() < end:
+            APP.processEvents()
+            time.sleep(0.005)
+
+    def test_a_frozen_window_is_logged_with_what_it_was_doing(self):
+        self.window.start_stall_watch()
+        self.pump(0.3)  # heartbeats flow, so nothing is reported
+        with self.assertLogs("onthisday.core.stallwatch", level="WARNING") as logged:
+            time.sleep(0.5)  # the window can't respond
+            self.pump(0.3)
+        self.assertIn("UI stalled", logged.output[0])
+        self.assertIn("page=GalleryPage", logged.output[0])
+        self.assertIn("test_a_frozen_window_is_logged", logged.output[0])
+
+    def test_starting_twice_keeps_one_watchdog(self):
+        self.window.start_stall_watch()
+        first = self.window.stall_watch
+        self.window.start_stall_watch()
+        self.assertIs(self.window.stall_watch, first)
+
+
 class SettingsTests(unittest.TestCase):
     def test_missing_folder_is_remembered(self):
         with tempfile.TemporaryDirectory() as temp:
