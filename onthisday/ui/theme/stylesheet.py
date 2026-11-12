@@ -67,6 +67,7 @@ def build_stylesheet(c: Palette) -> str:
     QFrame[role="viewerBar"] QPushButton:checked {{ background: rgba(255,255,255,0.24); }}
     QFrame[role="viewerBar"] QPushButton:disabled {{ color: rgba(236,238,242,0.35); background: transparent; border-color: rgba(255,255,255,0.08); }}
     QFrame[role="viewerBar"] QPushButton[variant="danger"] {{ color: #EE7180; background: transparent; border-color: #EE7180; }}
+    QFrame[role="viewerBar"] QPushButton[variant="danger"]:disabled {{ color: rgba(238,113,128,0.35); border-color: rgba(238,113,128,0.25); }}
     QFrame[role="viewerPanel"] {{ background: rgba(18, 20, 24, 0.94); border: none; border-left: 1px solid rgba(255,255,255,0.10); }}
     QFrame[role="viewerPanel"] QScrollArea, QFrame[role="viewerPanel"] QScrollArea > QWidget > QWidget {{ background: transparent; }}
     QFrame[role="viewerPanel"] QLabel {{ color: #ECEEF2; }}

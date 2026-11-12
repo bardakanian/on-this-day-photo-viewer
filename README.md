@@ -21,7 +21,10 @@ generation, search, and library analytics all stay on your computer.
   in the background, and scans read capture dates in parallel.
 - Draws the gallery as a virtual grid: only cards on screen are drawn and load thumbnails,
   so a day with thousands of items scrolls as smoothly as a day with ten.
-- Keeps itself current: the library is re-checked at launch and when you return to the app.
+- Opens straight to the saved index, and re-checks the library when you return to the app
+  after 10 minutes.
+- Browses the library while its drive is disconnected, using a preview of every item saved
+  in the background.
 - Includes a searchable, sortable library of every indexed video.
 - Calculates folder-specific Library Insights from the existing SQLite index.
 - Opens photos and videos in a full-window viewer with zoom, pan, and in-app video
@@ -68,10 +71,18 @@ Search and sort indexed videos without leaving the desktop app.
    entries (and cached thumbnails) for files that are no longer present. If the
    folder is unavailable, such as an unplugged drive, or contains no media at all,
    the scan leaves the existing index untouched.
-5. The library is checked again each time the app starts, and when you come back to
-   the app after 10 minutes or more, so new photos appear without a manual rescan. If the
-   library's drive isn't connected, the gallery says so, keeps the folder, and shows the
-   photos again as soon as the drive is back.
+5. The library is checked again when you come back to the app after 10 minutes or more,
+   or when you choose **Rescan**. Opening the app shows the saved index without scanning. If the
+   library's drive isn't connected, the gallery keeps the folder and shows the photos again
+   as soon as the drive is back.
+6. When the app opens and after each scan, a preview of every item is saved in the background, starting with the
+   calendar days coming up soonest; the status bar shows the progress. With the previews
+   saved, the gallery works while the library's drive is disconnected: it shows every
+   indexed item with its saved preview, and the viewer shows the preview, enlarged to fit,
+   in place of the original. Opening in another app, moving to the Trash, and playing
+   videos wait until the drive is back. Previews take about 35 KB per item (roughly 3.5 GB
+   for 100,000 items); turn them off under **Settings > Save a preview of every photo and
+   video**, and only items you've scrolled past keep one.
 
 The initial scan can take time for a large library. Subsequent scans are faster
 because unchanged files do not need to be analyzed again.
@@ -176,7 +187,7 @@ open it the first time with right-click > **Open** (or System Settings > Privacy
 ### Browse the daily gallery
 
 - Use **Choose Folder** to select or change the active media library.
-- The library refreshes itself at launch and when you return to the app; use **Rescan**
+- The library refreshes itself when you return to the app after 10 minutes; use **Rescan**
   to check right away after adding, moving, editing, or removing files.
 - Use the arrow controls to browse adjacent dates or **Today** to return to the
   current date.
@@ -256,6 +267,10 @@ system to move the original file to Trash. In the viewer, playback stops first s
 file can be moved, and the next item is shown afterwards. After a successful move, the matching SQLite record and cached
 thumbnail are removed and the gallery and Library Insights are refreshed.
 
+On a read-only drive, Move to Trash is dimmed and explains why. macOS can read NTFS drives
+but can't change them, so to delete files on one, install an NTFS driver, reformat the drive
+as APFS or exFAT after copying everything off it, or delete them from Windows.
+
 This action affects the original media file. Confirm that your system Trash and
 backups meet your recovery needs before using it.
 
@@ -315,6 +330,9 @@ Application data is stored under:
 └── thumbnails/
 ```
 
+The `thumbnails/` folder holds the saved previews: small JPEG copies of your photos and
+video frames. Treat it as private as the photos themselves.
+
 The configuration and SQLite index can contain the absolute path of the selected
 library and individual media files. The log can contain operational error details.
 Do not publish or commit this app-data directory.
@@ -371,6 +389,7 @@ onthisday/
 │   ├── metadata.py       Details for the viewer's Info panel (dimensions, video codec, …)
 │   ├── models.py         Shared immutable data models
 │   ├── settings.py       Local configuration persistence
+│   ├── thumbnail_warmer.py Saves a preview of every item in the background
 │   ├── workqueue.py      Background job queues for thumbnails and the viewer
 │   └── zoom.py           Zoom and pan arithmetic for the photo viewer
 └── ui/
@@ -417,8 +436,10 @@ For this checkout, the project virtual environment can be used directly:
   installed, then rescan the library.
 - **Recently changed media is not visible:** the library refreshes when you return to
   the app after 10 minutes; use **Rescan** to refresh it now.
-- **"Library folder unavailable":** connect the drive or network share that holds the
-  library. The photos come back when you return to the app.
+- **"Library drive not connected":** connect the drive or network share that holds the
+  library. Meanwhile the gallery shows saved previews; the originals come back when you
+  return to the app. **"Library folder unavailable"** means nothing from that day has been
+  indexed yet.
 - **A detected date looks wrong:** inspect the file's EXIF, embedded video metadata,
   Spotlight metadata, and filesystem timestamps.
 - **The app cannot move a file to Trash:** confirm that the file still exists and

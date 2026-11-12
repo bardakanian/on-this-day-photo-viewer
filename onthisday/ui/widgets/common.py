@@ -1,5 +1,5 @@
 from PySide6.QtCore import QEvent, QRectF, Qt, Signal
-from PySide6.QtGui import QIcon, QPainter, QPen, QPixmap
+from PySide6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QLineEdit, QPushButton, QVBoxLayout, QWidget
 
 
@@ -29,14 +29,18 @@ class SearchBox(QLineEdit):
         self.setPlaceholderText(placeholder)
         self.setClearButtonEnabled(True)
         self.setMinimumWidth(240)
+        self._icon_color = self._current_color()
         self._search_action = self.addAction(self._search_icon(), QLineEdit.ActionPosition.LeadingPosition)
+
+    def _current_color(self) -> QColor:
+        return self.palette().color(self.foregroundRole())
 
     def _search_icon(self) -> QIcon:
         pixmap = QPixmap(18, 18)
         pixmap.fill(Qt.GlobalColor.transparent)
         painter = QPainter(pixmap)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        pen = QPen(self.palette().color(self.foregroundRole()), 1.6)
+        pen = QPen(self._icon_color, 1.6)
         pen.setCapStyle(Qt.PenCapStyle.RoundCap)
         painter.setPen(pen)
         painter.drawEllipse(QRectF(3.2, 3.2, 8.5, 8.5))
@@ -46,7 +50,10 @@ class SearchBox(QLineEdit):
 
     def changeEvent(self, event: QEvent) -> None:
         if event.type() in {QEvent.Type.PaletteChange, QEvent.Type.StyleChange}:
-            self._search_action.setIcon(self._search_icon())
+            color = self._current_color()
+            if color != self._icon_color:  # a restyle that leaves the colour alone needs no new icon
+                self._icon_color = color
+                self._search_action.setIcon(self._search_icon())
         super().changeEvent(event)
 
 

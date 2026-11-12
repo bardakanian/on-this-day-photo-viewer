@@ -45,7 +45,7 @@ class FormatTests(unittest.TestCase):
 
     def test_info_panel_rows_follow_the_setting(self):
         info = MediaMetadata(Path("a.jpg"), "image", None, None, None, datetime(2015, 7, 4, 14, 5), None)
-        self.assertEqual(dict(metadata_rows(info, TIME_24_HOUR))["Date taken"], "July 4, 2015  •  14:05")
+        self.assertEqual(dict(metadata_rows(info, time_format=TIME_24_HOUR))["Date taken"], "July 4, 2015  •  14:05")
 
 
 class SettingTests(unittest.TestCase):
@@ -78,8 +78,9 @@ class SettingTests(unittest.TestCase):
 
 class InterfaceTests(unittest.TestCase):
     def test_dialog_shows_and_returns_the_choice(self):
-        dialog = PreferencesDialog("system", TIME_24_HOUR)
+        dialog = PreferencesDialog("system", True, TIME_24_HOUR)
         self.assertEqual(dialog.selected_time_format, TIME_24_HOUR)
+        self.assertTrue(dialog.selected_save_previews, "the previews option sits beside it and keeps its value")
         dialog.time_format.setCurrentIndex(dialog.time_format.findData(TIME_12_HOUR))
         self.assertEqual(dialog.selected_time_format, TIME_12_HOUR)
 

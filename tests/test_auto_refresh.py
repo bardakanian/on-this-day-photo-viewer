@@ -1,4 +1,4 @@
-"""The library refreshes itself at launch and when you come back to the app."""
+"""The library refreshes itself when you come back to the app, but not at launch."""
 
 import os
 
@@ -56,8 +56,12 @@ class WindowTestCase(unittest.TestCase):
 
     def tearDown(self):
         self.window.close()
-        if self.window.index_thread:
-            self.window.index_thread.join(10)
+        for thread in (self.window.index_thread, self.window.preview_thread):
+            if thread:
+                thread.join(10)
+        # Queries still running would hold the temporary database open, which Windows won't delete.
+        self.window.gallery_pool.waitForDone(10000)
+        self.window.analytics_pool.waitForDone(10000)
         for item in reversed(self.patches):
             item.stop()
         self.temp.cleanup()
@@ -77,27 +81,26 @@ class WindowTestCase(unittest.TestCase):
 
 
 class AutoRefreshTests(WindowTestCase):
-    def test_launch_scan_then_rescan_on_return(self):
+    def test_no_scan_at_launch_then_rescan_on_return(self):
         APP.processEvents()  # runs the startup step
-        self.wait_until(lambda: self.shown() == {"first.jpg"})  # without pressing Rescan
+        self.assertIsNone(self.window.index_thread)
 
         self.add_photo("second.jpg")
-        self.window.rescan_if_stale()  # back in the app, but the last scan was just now
-        self.assertFalse(self.window.index_thread.is_alive())
+        self.window.rescan_if_stale()  # back in the app, but it only just opened
+        self.assertIsNone(self.window.index_thread)
         self.window.last_scan_finished -= AUTO_RESCAN_SECONDS
         self.window.rescan_if_stale()
         self.wait_until(lambda: self.shown() == {"first.jpg", "second.jpg"})
 
     def test_unplugged_drive_does_not_interrupt_with_a_dialog(self):
         APP.processEvents()
-        self.wait_until(lambda: self.window.last_scan_finished is not None)
         self.library.rename(self.unplugged)
         self.window.last_scan_finished -= AUTO_RESCAN_SECONDS
         finished = self.window.last_scan_finished
         self.window.rescan_if_stale()
         self.wait_until(lambda: self.window.last_scan_finished != finished)
         self.assertEqual(self.errors, [])
-        self.assertIn("unavailable", self.window.status.text())
+        self.assertIn("not connected", self.window.status.text())
 
 
 class UnpluggedAtLaunchTests(WindowTestCase):
@@ -107,13 +110,36 @@ class UnpluggedAtLaunchTests(WindowTestCase):
 
     def test_library_comes_back_when_the_drive_does(self):
         APP.processEvents()
-        self.wait_until(lambda: self.window.last_scan_finished is not None)
         self.wait_until(lambda: self.window.gallery.empty.title_label.text() == "Library folder unavailable")
         self.assertEqual(self.window.root_folder, self.library, "the saved folder must not be forgotten")
         self.assertEqual(self.errors, [])
         self.unplugged.rename(self.library)  # plugged back in
         self.window.rescan_if_stale()  # returning to the app; no ten-minute wait
         self.wait_until(lambda: self.shown() == {"first.jpg"})
+
+
+class StallLoggingTests(WindowTestCase):
+    def pump(self, seconds: float) -> None:
+        end = time.time() + seconds
+        while time.time() < end:
+            APP.processEvents()
+            time.sleep(0.005)
+
+    def test_a_frozen_window_is_logged_with_what_it_was_doing(self):
+        self.window.start_stall_watch()
+        self.pump(0.3)  # heartbeats flow, so nothing is reported
+        with self.assertLogs("onthisday.core.stallwatch", level="WARNING") as logged:
+            time.sleep(0.5)  # the window can't respond
+            self.pump(0.3)
+        self.assertIn("UI stalled", logged.output[0])
+        self.assertIn("page=GalleryPage", logged.output[0])
+        self.assertIn("test_a_frozen_window_is_logged", logged.output[0])
+
+    def test_starting_twice_keeps_one_watchdog(self):
+        self.window.start_stall_watch()
+        first = self.window.stall_watch
+        self.window.start_stall_watch()
+        self.assertIs(self.window.stall_watch, first)
 
 
 class SettingsTests(unittest.TestCase):

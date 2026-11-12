@@ -6,7 +6,7 @@ from PySide6.QtGui import QColor, QCursor, QFont, QFontMetrics, QImage, QPainter
 from PySide6.QtWidgets import QAbstractScrollArea, QMenu, QToolTip
 
 from ...core.gallery_layout import CARD_WIDTH, Cell, GalleryLayout, layout_sections
-from ...core.media import get_cached_thumbnail, legacy_thumbnail_cache_path, thumbnail_cache_path
+from ...core.media import get_cached_thumbnail, legacy_thumbnail_cache_path, read_only_trash_reason, thumbnail_cache_path
 from ...core.models import MediaRecord
 from ...core.workqueue import WorkQueue
 from ...core.timeformat import DEFAULT_TIME_FORMAT, format_capture
@@ -58,7 +58,9 @@ class ThumbnailLoader(QObject):
         self._signals = _Signals()
         self._signals.loaded.connect(self.loaded)
 
-    def request(self, record: MediaRecord, size: QSize) -> None:
+    def request(self, record: MediaRecord, size: QSize, generate_missing: bool = True) -> None:
+        """Load a saved thumbnail, making it first when it's missing (unless `generate_missing` is off,
+        as while the originals' drive is disconnected)."""
         key = _thumbnail_key(record)
         emit = self._emit
 
@@ -73,6 +75,9 @@ class ThumbnailLoader(QObject):
                 return
             # Show an older low-resolution thumbnail while the sharp one is made.
             legacy = legacy_thumbnail_cache_path(record.path, record.file_size, record.modified_ns)
+            if not generate_missing:
+                emit(key, _load_scaled(legacy, size) if legacy.exists() else None, True)
+                return
             if legacy.exists():
                 emit(key, _load_scaled(legacy, size), False)
             self._generate.submit(key, generate)
@@ -118,6 +123,11 @@ class GalleryGrid(QAbstractScrollArea):
         self.colors: Palette = LIGHT
         self.time_format = DEFAULT_TIME_FORMAT
         self.root_folder: Path | None = None
+        # resolve() asks the file system, which is slow on Windows, so it's done once per load
+        # here and not for every card on every repaint.
+        self._root_resolved: Path | None = None
+        self.offline = False  # the originals' drive is disconnected: saved previews only, no Trash
+        self.read_only = False  # the originals' drive can't be changed: Move to Trash is dimmed
         self.sections: list[tuple[int, list[MediaRecord]]] = []
         self.collapsed: set[int] = set()
         self.layout_: GalleryLayout = layout_sections([], [], 0)
@@ -141,9 +151,16 @@ class GalleryGrid(QAbstractScrollArea):
     # Content -------------------------------------------------------------------
 
     def set_sections(self, sections: list[tuple[int, list[MediaRecord]]], root_folder: Path | None,
-                     collapsed: set[int] | None = None) -> None:
+                     collapsed: set[int] | None = None, offline: bool = False, read_only: bool = False) -> None:
+        self.read_only = read_only
+        if offline != self.offline:
+            # Previews looked up in the other mode may be wrong now: missing ones can be made
+            # once the drive is back, and ones made before it went away can be shown.
+            self.clear_thumbnails()
+        self.offline = offline
         self.sections = sections
         self.root_folder = root_folder
+        self._root_resolved = self._resolve(root_folder)
         self.collapsed = {year for year in (collapsed or set()) if any(year == y for y, _ in sections)}
         self._hover = self._pressed = None
         self._relayout()
@@ -259,8 +276,9 @@ class GalleryGrid(QAbstractScrollArea):
         elif pixmap is FAILED:
             painter.setFont(self._body_font)
             painter.setPen(QColor(c.text_muted))
-            painter.drawText(preview, Qt.AlignmentFlag.AlignCenter,
-                             "Video preview unavailable" if record.is_video else "Preview unavailable")
+            text = "No saved preview" if self.offline else (
+                "Video preview unavailable" if record.is_video else "Preview unavailable")
+            painter.drawText(preview, Qt.AlignmentFlag.AlignCenter, text)
 
         painter.setFont(self._caption_font)
         painter.setPen(QColor(c.text_subtle))
@@ -276,16 +294,21 @@ class GalleryGrid(QAbstractScrollArea):
 
         trash = self._trash_rect(cell)
         folder_rect = QRect(DETAILS_LINE.translated(cell.x, cell.y))
-        folder_rect.setRight(int(trash.left()) - 8)
+        if not self.offline:
+            folder_rect.setRight(int(trash.left()) - 8)
         painter.setPen(QColor(c.text_muted))
         painter.drawText(folder_rect, Qt.AlignmentFlag.AlignVCenter,
                          QFontMetrics(self._body_font).elidedText(self._folder_text(record), Qt.TextElideMode.ElideMiddle, folder_rect.width()))
+        if self.offline:
+            return  # nothing to move to the Trash while the file can't be reached
 
         danger = QColor(c.danger)
         hover_fill = QColor(danger)
         hover_fill.setAlpha(28)
+        if self.read_only:
+            danger.setAlpha(90)
         painter.setPen(QPen(danger, 1))
-        painter.setBrush(hover_fill if self._is_hover(cell, "trash") else Qt.BrushStyle.NoBrush)
+        painter.setBrush(hover_fill if self._is_hover(cell, "trash") and not self.read_only else Qt.BrushStyle.NoBrush)
         painter.drawRoundedRect(trash.adjusted(0.5, 0.5, -0.5, -0.5), Metrics.RADIUS_SMALL, Metrics.RADIUS_SMALL)
         painter.drawText(trash, Qt.AlignmentFlag.AlignCenter, TRASH_LABEL)
 
@@ -294,10 +317,19 @@ class GalleryGrid(QAbstractScrollArea):
         line = DETAILS_LINE.translated(cell.x, cell.y)
         return QRectF(line.right() + 1 - width, line.top(), width, line.height())
 
+    @staticmethod
+    def _resolve(folder: Path | None) -> Path | None:
+        if folder is None:
+            return None
+        try:
+            return folder.resolve()
+        except OSError:
+            return None
+
     def _folder_text(self, record: MediaRecord) -> str:
         try:
-            relative = record.path.parent.relative_to(self.root_folder.resolve()) if self.root_folder else None
-        except (ValueError, OSError):
+            relative = record.path.parent.relative_to(self._root_resolved) if self._root_resolved else None
+        except ValueError:
             relative = None
         if relative is None:
             return str(record.path.parent)
@@ -319,7 +351,7 @@ class GalleryGrid(QAbstractScrollArea):
                 self._pixmaps.move_to_end(key)  # keep what's on screen in the cache
             if key not in self._requested and (key not in self._pixmaps or key in self._placeholders):
                 self._requested.add(key)
-                self.loader.request(record, size)
+                self.loader.request(record, size, generate_missing=not self.offline)
         for key in self.loader.focus(wanted):
             self._requested.discard(key)  # scrolled away; asked for again when it comes back
 
@@ -360,7 +392,7 @@ class GalleryGrid(QAbstractScrollArea):
         if cell.is_header:
             return cell, "header"
         local = QPointF(x - cell.x, y - cell.y)
-        if self._trash_rect(Cell(0, 0, 0, 0, cell.width, cell.height)).contains(local):
+        if not self.offline and self._trash_rect(Cell(0, 0, 0, 0, cell.width, cell.height)).contains(local):
             return cell, "trash"
         if QRectF(PREVIEW).contains(local):
             return cell, "preview"
@@ -377,7 +409,7 @@ class GalleryGrid(QAbstractScrollArea):
         target = self._target(event.position())
         if target != self._hover:
             self._hover = target
-            clickable = target is not None and target[1] in {"header", "trash", "preview"}
+            clickable = target is not None and (target[1] in {"header", "preview"} or (target[1] == "trash" and not self.read_only))
             self.viewport().setCursor(QCursor(Qt.CursorShape.PointingHandCursor if clickable else Qt.CursorShape.ArrowCursor))
             self.viewport().update()
         super().mouseMoveEvent(event)
@@ -400,6 +432,8 @@ class GalleryGrid(QAbstractScrollArea):
         cell, part = pressed
         if part == "header":
             self.toggle_section(self.sections[cell.section][0])
+        elif part == "trash" and self.read_only:
+            QToolTip.showText(event.globalPosition().toPoint(), read_only_trash_reason(), self.viewport())
         elif part == "trash" and (record := self.record_for(cell)) is not None:
             self.delete_requested.emit(record)
         elif part == "preview" and (record := self.record_for(cell)) is not None:
@@ -412,8 +446,9 @@ class GalleryGrid(QAbstractScrollArea):
             return
         menu = QMenu(self)
         menu.addAction("Open", lambda: self.open_requested.emit(record))
-        menu.addSeparator()
-        menu.addAction(TRASH_LABEL, lambda: self.delete_requested.emit(record))
+        if not self.offline:
+            menu.addSeparator()
+            menu.addAction(TRASH_LABEL, lambda: self.delete_requested.emit(record)).setEnabled(not self.read_only)
         menu.exec(event.globalPos())
 
     def viewportEvent(self, event) -> bool:
@@ -423,7 +458,7 @@ class GalleryGrid(QAbstractScrollArea):
             tips = {
                 "name": str(record.path) if record else "",
                 "folder": str(record.path.parent) if record else "",
-                "trash": f"Move {record.path.name} to Trash" if record else "",
+                "trash": read_only_trash_reason() if self.read_only else f"Move {record.path.name} to Trash" if record else "",
             }
             text = tips.get(target[1], "") if target else ""
             if text:

@@ -2,6 +2,7 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QKeySequence, QPixmap, QShortcut
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QStackedWidget, QVBoxLayout, QWidget
 
+from ...core.media import read_only_trash_reason
 from ...core.metadata import MediaMetadata, metadata_rows
 from ...core.timeformat import DEFAULT_TIME_FORMAT, format_capture
 from ...core.models import ViewerItem
@@ -37,6 +38,11 @@ class ViewerPage(QWidget):
         self.index = 0
         self._full_requested = False
         self._screen_decoded = False
+        # The original and the saved preview load side by side; either can finish first.
+        self._original_failed = False
+        self._placeholder_done = False
+        self.offline = False  # the library's drive is disconnected: saved previews only
+        self.read_only = False  # the library's drive can't be changed: nothing can be moved to the Trash
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -87,10 +93,10 @@ class ViewerPage(QWidget):
         self.info_button.setCheckable(True)
         self.info_button.toggled.connect(self._set_info_visible)
         bar.addWidget(self.info_button)
-        open_button = self._button("Open in Default App", "Open in the default app")
-        open_button.clicked.connect(self._open_externally)
-        bar.addWidget(open_button)
-        trash = self._button("Move to Trash", f"Move to Trash ({native_keys('Ctrl+Backspace')})")
+        self.open_button = self._button("Open in Default App", "Open in the default app")
+        self.open_button.clicked.connect(self._open_externally)
+        bar.addWidget(self.open_button)
+        self.trash_button = trash = self._button("Move to Trash", f"Move to Trash ({native_keys('Ctrl+Backspace')})")
         trash.setProperty("variant", "danger")
         trash.clicked.connect(self._trash_current)
         bar.addWidget(trash)
@@ -151,6 +157,19 @@ class ViewerPage(QWidget):
     @property
     def current_item(self) -> ViewerItem | None:
         return self.items[self.index] if 0 <= self.index < len(self.items) else None
+
+    def set_offline(self, offline: bool, read_only: bool = False) -> None:
+        """While the library's drive is disconnected, photos show their saved preview and files can't
+        be opened elsewhere or moved to the Trash."""
+        self.offline = offline
+        self.read_only = read_only
+        for button in (self.open_button, self.trash_button):
+            button.setEnabled(not offline)
+        reason = "The library's drive isn't connected"
+        self.open_button.setToolTip(reason if offline else "Open in the default app")
+        self.trash_button.setEnabled(not offline and not read_only)
+        self.trash_button.setToolTip(reason if offline else read_only_trash_reason() if read_only
+                                     else f"Move to Trash ({native_keys('Ctrl+Backspace')})")
 
     def show_items(self, items: list[ViewerItem], index: int) -> None:
         self.items = items
@@ -220,12 +239,17 @@ class ViewerPage(QWidget):
             return
         self._update_labels(item)
         self._full_requested = False
+        self._original_failed = self._placeholder_done = False
         if item.is_video:
             self.zoom_label.clear()
             self.fit_button.hide()
             self.canvas.clear()
             self.content.setCurrentWidget(self.video)
-            self.video.load(item.path)
+            if self.offline:
+                self.video.show_unavailable("The drive holding this video isn't connected.\n"
+                                            "Connect it to play the video.", can_open=False)
+            else:
+                self.video.load(item.path)
         else:
             self.video.stop()
             self.fit_button.show()
@@ -244,7 +268,7 @@ class ViewerPage(QWidget):
         else:
             # The gallery thumbnail shows first; the sharp decode then replaces it in place.
             self.canvas.set_message("Loading…")
-            self.images.request_placeholder(item)
+            self.images.request_placeholder(item, keep_padding=self.offline)
             self.images.request(item, edge)
 
     def _prefetch_neighbours(self) -> None:
@@ -271,17 +295,41 @@ class ViewerPage(QWidget):
         if current is None or current.key != key or current.is_video:
             return  # a stale result for an item we've moved away from (or a prefetch)
         if kind == PLACEHOLDER:
-            # Only useful until the screen-sized decode lands.
+            self._placeholder_done = True
+            # Only useful until the screen-sized decode lands, or instead of an original that can't be read.
             if image is not None and not self._screen_decoded:
-                self.canvas.set_content(QPixmap.fromImage(image), None)
+                self.canvas.set_content(QPixmap.fromImage(image), self._offline_display_size(image) if self.offline else None)
+            if self._original_failed:
+                self._show_original_failure()
             return
         if image is None:
             if kind is not None and not self._screen_decoded:
-                self.canvas.set_message("This photo can't be displayed.")
+                self._original_failed = True
+                if self.canvas.has_image or self._placeholder_done:
+                    self._show_original_failure()
+                # Otherwise the saved preview is still loading; it reports the failure when it lands.
             return
         if kind is not None:
             self._screen_decoded = True
         self.canvas.set_pixmap(QPixmap.fromImage(image), natural)
+
+    def _offline_display_size(self, image) -> tuple[int, int]:
+        """With no original to load, show the saved preview fitted to the window instead of at its
+        own small size: soft, but far easier to see."""
+        width, height = image.width(), image.height()
+        scale = max(1.0, min(self.canvas.width() / max(1, width), self.canvas.height() / max(1, height)))
+        return round(width * scale), round(height * scale)
+
+    def _show_original_failure(self) -> None:
+        if self.canvas.has_image:
+            # The original can't be read (its drive may be disconnected): keep the saved preview.
+            note = "saved preview; original unavailable"
+            if note not in self.subtitle.text():
+                self.subtitle.setText(f"{self.subtitle.text()}  ·  {note}")
+        elif self.offline:
+            self.canvas.set_message("The drive holding this photo isn't connected, and no preview was saved.")
+        else:
+            self.canvas.set_message("This photo can't be displayed.")
 
     # Info panel --------------------------------------------------------------
 
@@ -295,7 +343,7 @@ class ViewerPage(QWidget):
             return  # details are only read while the panel is open
         cached = self.metadata.cached(item)
         if cached is not None:
-            self.info_panel.show_rows(metadata_rows(cached, self.time_format))
+            self.info_panel.show_rows(metadata_rows(cached, item.captured_at, self.time_format))
         else:
             self.info_panel.show_message("Loading…")
             self.metadata.request(item)
@@ -303,7 +351,7 @@ class ViewerPage(QWidget):
     def _metadata_loaded(self, key, metadata: MediaMetadata) -> None:
         current = self.current_item
         if current is not None and current.key == key and not self.info_panel.isHidden():
-            self.info_panel.show_rows(metadata_rows(metadata, self.time_format))
+            self.info_panel.show_rows(metadata_rows(metadata, current.captured_at, self.time_format))
 
     def _request_full_resolution(self) -> None:
         item = self.current_item
@@ -330,7 +378,7 @@ class ViewerPage(QWidget):
             self.open_externally_requested.emit(self.current_item)
 
     def _trash_current(self) -> None:
-        if self.current_item is not None:
+        if self.current_item is not None and not self.offline and not self.read_only:
             # Release the file before it is moved.
             self.stop()
             self.trash_requested.emit(self.current_item)
