@@ -97,7 +97,8 @@ class MediaIndexer:
                 for future in done:
                     store(future)
 
-            self.send("scan_started")
+            # The last scan's count stands in for the total, which is only known once the walk ends.
+            self.send("scan_started", expected=len(cached))
             for path in media_candidates(self.folder):
                 if self.stop_event.is_set():
                     self.send("scan_cancelled")

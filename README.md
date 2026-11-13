@@ -84,6 +84,15 @@ Search and sort indexed videos without leaving the desktop app.
    for 100,000 items); turn them off under **Settings > Save a preview of every photo and
    video**, and only items you've scrolled past keep one.
 
+While a scan or saving previews runs, the status bar shows how far along it is and about
+how long is left, and a thin bar under the toolbar fills up. When it finishes, the status bar
+says how long it took. A job that took more than a minute also shows a notification
+(Notification Center on macOS, a tray message on Windows), and bounces the Dock icon (flashes
+the taskbar button on Windows) if you've switched to another app. On macOS the notification
+comes from Script Editor, since the app runs as a Python script; allow its notifications in
+System Settings > Notifications if they don't appear. A first scan can't know the
+total yet, so it shows only a count.
+
 The initial scan can take time for a large library. Subsequent scans are faster
 because unchanged files do not need to be analyzed again.
 
@@ -388,6 +397,7 @@ onthisday/
 │   ├── media.py          Metadata detection, thumbnails, and viewer image decoding
 │   ├── metadata.py       Details for the viewer's Info panel (dimensions, video codec, …)
 │   ├── models.py         Shared immutable data models
+│   ├── progress.py       Time-left estimates for scans and saving previews
 │   ├── settings.py       Local configuration persistence
 │   ├── thumbnail_warmer.py Saves a preview of every item in the background
 │   ├── workqueue.py      Background job queues for thumbnails and the viewer

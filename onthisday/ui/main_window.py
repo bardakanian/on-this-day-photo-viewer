@@ -16,10 +16,12 @@ from ..core.database import MediaRepository
 from ..core.indexer import MediaIndexer
 from ..core.media import FFMPEG_ENABLED, HEIC_ENABLED, is_read_only_folder, open_in_default_app, thumbnail_cache_files
 from ..core.models import MediaRecord, VideoRecord, ViewerItem
+from ..core.progress import Eta, format_duration_words, time_left_text
 from ..core.settings import SettingsStore
 from ..core.stallwatch import StallWatchdog
 from ..core.thumbnail_warmer import in_preview_order, warm_thumbnails
 from .dialogs import PreferencesDialog
+from .notifications import notify
 from .pages import GalleryPage, LibraryInsightsPage, VideosPage, ViewerPage
 from .theme import ThemeManager
 
@@ -28,6 +30,10 @@ LOGGER = logging.getLogger(__name__)
 
 class IndexEvents(QObject):
     received = Signal(object)
+
+
+# Shorter jobs finish while you're still watching, so they don't get a notification.
+ANNOUNCE_AFTER_SECONDS = 60
 
 
 class PreviewEvents(QObject):
@@ -118,6 +124,9 @@ class MainWindow(QMainWindow):
         self.preview_thread: threading.Thread | None = None
         self.stall_watch: StallWatchdog | None = None
         self.ready_text = "Ready"  # the status line after a scan, which preview progress is added to
+        self.scan_eta = Eta()
+        self.scan_expected = 0
+        self.preview_eta = Eta()
         self.index_events = IndexEvents()
         self.index_events.received.connect(self._handle_index_event)
         self.analytics_events = AnalyticsEvents()
@@ -351,13 +360,23 @@ class MainWindow(QMainWindow):
             return
         event_type = event.get("type")
         if event_type == "scan_started":
-            self.progress.show()
+            self.scan_eta = Eta()
+            self.scan_expected = event.get("expected", 0)
+            self._show_progress(0, self.scan_expected)
             self.rescan_button.setEnabled(False)
-            self.status.setText("Indexing media library…")
+            self.status.setText("Scanning library…")
         elif event_type == "scan_progress":
-            self.status.setText(
-                f"Scanning  ·  {event['scanned']:,} checked  ·  {event['updated']:,} updated  ·  {event['unchanged']:,} cached"
-            )
+            scanned = event["scanned"]
+            # New files can push the count past the last scan's; then the total is unknown again.
+            total = self.scan_expected if scanned <= self.scan_expected else 0
+            self._show_progress(scanned, total)
+            if total:
+                position = f"{scanned:,} of about {total:,} checked  ·  {time_left_text(self.scan_eta.remaining(scanned, total))}"
+            elif self.scan_expected:
+                position = f"{scanned:,} checked  ·  more files than last time, so almost done"
+            else:
+                position = f"{scanned:,} checked  ·  first scan, so the total isn't known yet"
+            self.status.setText(f"Scanning  ·  {position}  ·  {event['updated']:,} new or changed")
         elif event_type in {"scan_complete", "scan_cancelled", "scan_error"}:
             self.progress.hide()
             self.last_scan_finished = time.monotonic()
@@ -366,10 +385,15 @@ class MainWindow(QMainWindow):
                 return
             self.rescan_button.setEnabled(True)
             if event_type == "scan_complete":
+                took = format_duration_words(self.scan_eta.elapsed())
                 self.ready_text = (
-                    f"Library ready  ·  {event['total_indexed']:,} items  ·  {event['updated']:,} updated  ·  {event['deleted']:,} removed"
+                    f"Library ready  ·  {event['total_indexed']:,} items  ·  {event['updated']:,} updated  ·  "
+                    f"{event['deleted']:,} removed  ·  scan finished in {took}"
                 )
                 self.status.setText(self.ready_text)
+                self._announce_if_long(self.scan_eta, "Scan finished",
+                                       f"{event['total_indexed']:,} items checked in {took}  ·  "
+                                       f"{event['updated']:,} new or changed, {event['deleted']:,} removed")
                 self.start_saving_previews()
                 if event["updated"] or event["deleted"] or self.library_unavailable:
                     # Rebuilding unchanged pages would only flicker and reload thumbnails.
@@ -584,6 +608,7 @@ class MainWindow(QMainWindow):
             return
         self.stop_saving_previews()
         stop = self.preview_stop = threading.Event()
+        self.preview_eta = Eta()
         repository, emit = self.repository, self.preview_events.received.emit
 
         def run():
@@ -606,11 +631,38 @@ class MainWindow(QMainWindow):
             return  # from a run that was stopped, or a scan is showing its own progress
         if "result" in event:
             result = event["result"]
+            self.progress.hide()
             if result.created:
                 LOGGER.info("Saved %d previews (%d unreadable)", result.created, result.failed)
+            if result.missing and not result.stopped:
+                took = format_duration_words(self.preview_eta.elapsed())
+                self.ready_text = self.ready_text.split("  ·  all previews saved")[0]
+                self.ready_text += f"  ·  all previews saved ({result.created:,} new, in {took})"
+                self._announce_if_long(self.preview_eta, "Previews saved",
+                                       f"{result.created:,} previews saved in {took}. The library can now be "
+                                       "browsed while its drive is disconnected.")
             self.status.setText(self.ready_text)
         elif event["missing"]:
-            self.status.setText(f"{self.ready_text}  ·  saving previews {event['done']:,} of {event['missing']:,}")
+            done, missing = event["done"], event["missing"]
+            self._show_progress(done, missing)
+            left = time_left_text(self.preview_eta.remaining(done, missing))
+            self.status.setText(f"{self.ready_text}  ·  saving previews {done:,} of {missing:,}  ·  {left}")
+
+    def _show_progress(self, done: int, total: int) -> None:
+        """The thin bar under the toolbar: filling up when the total is known, moving when it isn't."""
+        self.progress.setRange(0, total)
+        if total:
+            self.progress.setValue(min(done, total))
+        self.progress.show()
+
+    def _announce_if_long(self, eta: Eta, title: str, message: str) -> None:
+        """For jobs long enough that you've likely looked away: a system notification, and if you've
+        switched to another app, a bounce of the Dock icon (a flash of the taskbar button on Windows)."""
+        if eta.elapsed() < ANNOUNCE_AFTER_SECONDS:
+            return
+        notify(title, message)
+        if not self.isActiveWindow():
+            QApplication.alert(self)
 
     def scan_running(self) -> bool:
         return bool(self.index_thread and self.index_thread.is_alive())
