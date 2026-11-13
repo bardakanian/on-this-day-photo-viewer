@@ -4,7 +4,7 @@ With every change, bump `VERSION` in `onthisday/core/constants.py` and add an en
 
 ## 1.12.0 — 2026-11-13
 
-- Scans and saving previews show how far along they are and about how long is left ("12,340 of about 111,000 checked · about 2 min left"), with a progress bar that fills up under the toolbar.
+- Scans and saving previews show how far along they are and about how long is left ("12,340 of about 111,000 checked · about 2 min left"), with a progress bar that fills up under the toolbar. The estimate counts down steadily: it's based on the last minute's pace blended with the pace since the start, so bursts of quick files and stalls on slow ones (HEIC photos, videos) don't make it bounce.
 - When they finish, the status bar says so and how long it took ("scan finished in 1 min", "all previews saved (91,000 new, in 3 h)").
 - Jobs that took more than a minute also show a system notification when they finish (Notification Center on macOS, a tray message on Windows). If you've switched to another app, the Dock icon bounces too (the taskbar button flashes on Windows).
 - A first scan, whose total isn't known yet, says so instead of guessing.
