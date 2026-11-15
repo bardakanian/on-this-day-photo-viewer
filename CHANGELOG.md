@@ -2,6 +2,20 @@
 
 With every change, bump `VERSION` in `onthisday/core/constants.py` and add an entry here.
 
+## 1.14.0 — 2026-11-15
+
+- Settings shows how much space the saved previews take ("Saved previews: 4.2 GB (119,530 files)"), counted in the background so the dialog opens at once.
+- **Delete All Previews…** in Settings frees that space. It asks first and says what you lose: without previews, the gallery can't show the library while its drive is disconnected. If saving previews is still on, they're saved again in the background.
+- Turning off **Save a preview of every photo and video** now offers to delete the previews already saved. Before, it only stopped new ones, and the old ones stayed on disk.
+- Scans now delete the previews of Live Photo clips, which aren't shown on their own.
+
+## 1.13.0 — 2026-11-15
+
+- Live Photos: an iPhone Live Photo saved as two files (for example `IMG_4330.HEIC` and `IMG_4330.MOV`) now shows once, as a photo with a Live Photo badge, instead of a photo plus a separate 1–3 second video. The two files are paired when they share a folder and a name and were taken within 5 seconds of each other.
+- In the viewer, **◉ LIVE** (or L) plays the motion and then returns to the still. Press it again, or Space, to stop early.
+- Moving a Live Photo to the Trash moves its video too. If the video can't be moved, it stays in the library as a video of its own.
+- The Video Library, the Videos filter and Library Insights no longer count Live Photo clips as videos. Existing indexes are paired the first time the app opens, with no rescan.
+
 ## 1.12.0 — 2026-11-13
 
 - Scans and saving previews show how far along they are and about how long is left ("12,340 of about 111,000 checked · about 2 min left"), with a progress bar that fills up under the toolbar. The estimate counts down steadily: it's based on the last minute's pace blended with the pace since the start, so bursts of quick files and stalls on slow ones (HEIC photos, videos) don't make it bounce.

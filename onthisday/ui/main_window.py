@@ -15,7 +15,9 @@ from ..core.constants import APP_NAME, AUTO_RESCAN_SECONDS, VERSION
 from ..core.database import MediaRepository
 from ..core.indexer import MediaIndexer
 from ..core.media import FFMPEG_ENABLED, HEIC_ENABLED, is_read_only_folder, open_in_default_app, thumbnail_cache_files
+from ..core.metadata import format_file_size
 from ..core.models import MediaRecord, VideoRecord, ViewerItem
+from ..core.preview_cache import CacheUsage, cache_usage, delete_previews
 from ..core.progress import Eta, format_duration_words, time_left_text
 from ..core.settings import SettingsStore
 from ..core.stallwatch import StallWatchdog
@@ -41,6 +43,10 @@ class PreviewEvents(QObject):
 
 
 class AnalyticsEvents(QObject):
+    received = Signal(object)
+
+
+class CacheEvents(QObject):
     received = Signal(object)
 
 
@@ -122,6 +128,15 @@ class MainWindow(QMainWindow):
         self.preview_events.received.connect(self._handle_preview_event)
         self.preview_stop = threading.Event()
         self.preview_thread: threading.Thread | None = None
+        # Counting and deleting saved previews, for Settings.
+        self.cache_events = CacheEvents()
+        self.cache_events.received.connect(self._handle_cache_event)
+        self.cache_stop = threading.Event()
+        self.cache_job: threading.Thread | None = None
+        self.cache_job_deletes = False
+        self.cache_usage: CacheUsage | None = None
+        self.preferences: PreferencesDialog | None = None
+        self.restart_previews_after_dialog = False
         self.stall_watch: StallWatchdog | None = None
         self.ready_text = "Ready"  # the status line after a scan, which preview progress is added to
         self.scan_eta = Eta()
@@ -569,12 +584,14 @@ class MainWindow(QMainWindow):
             self._error("Unable to move file", "This file is outside the selected media folder.")
             return False
 
-        kind = "video" if record.is_video else "photo"
+        kind = "video" if record.is_video else "Live Photo" if record.is_live else "photo"
         dialog = QMessageBox(self)
         dialog.setIcon(QMessageBox.Icon.Warning)
         dialog.setWindowTitle(f"Move {kind} to Trash?")
         dialog.setText(f"Move “{record.path.name}” to Trash?")
-        dialog.setInformativeText("This removes the original file from your media library. You can recover it from Trash.")
+        live_note = " Its Live Photo video is moved too." if record.is_live else ""
+        dialog.setInformativeText("This removes the original file from your media library."
+                                  f"{live_note} You can recover it from Trash.")
         move_button = dialog.addButton("Move to Trash", QMessageBox.ButtonRole.DestructiveRole)
         dialog.addButton(QMessageBox.StandardButton.Cancel)
         dialog.setDefaultButton(QMessageBox.StandardButton.Cancel)
@@ -586,14 +603,23 @@ class MainWindow(QMainWindow):
         if not QFile.moveToTrash(str(record.path)):
             self._error("Unable to move file", "The file could not be moved to Trash. Check that it still exists and that you have permission to change it.")
             return False
+        clip = record.live_video if record.is_live else None
+        clip_moved = clip is not None and QFile.moveToTrash(str(clip))
         try:
+            # Removing the photo alone unpairs its clip, which then shows as a video of its own.
             self.repository.remove(folder, record.path)
+            if clip_moved:
+                self.repository.remove(folder, clip)
             for cached in cached_files:
                 cached.unlink(missing_ok=True)
         except OSError:
             LOGGER.exception("Media moved to Trash, but cached data could not be removed")
         except Exception:
             LOGGER.exception("Media moved to Trash, but its index record could not be removed")
+        if clip is not None and not clip_moved:
+            self._error("Live Photo video not moved",
+                        f"“{record.path.name}” was moved to Trash, but its Live Photo video “{clip.name}” "
+                        "could not be. It now shows as a video of its own.")
         self.status.setText(f"Moved {record.path.name} to Trash")
         self.refresh_gallery()
         self._load_insights()
@@ -691,7 +717,18 @@ class MainWindow(QMainWindow):
 
     def show_preferences(self) -> None:
         dialog = PreferencesDialog(self.settings.theme, self.settings.save_previews, self.settings.time_format, self)
-        if dialog.exec():
+        dialog.delete_previews_requested.connect(lambda: self._confirm_delete_previews(dialog))
+        self.preferences = dialog
+        if self.deleting_previews():
+            dialog.set_cache_usage(None, deleting=True)
+        else:
+            self.cache_usage = None
+            self._start_cache_job(count_only=True)
+        try:
+            accepted = dialog.exec()
+        finally:
+            self.preferences = None
+        if accepted:
             self.settings.theme = dialog.selected_theme
             self.theme.apply(self.settings.theme)
             self.settings.time_format = dialog.selected_time_format
@@ -703,11 +740,114 @@ class MainWindow(QMainWindow):
                 else:
                     self.stop_saving_previews()
                     self.status.setText(self.ready_text or self.status.text())
+                    self._offer_to_delete_previews()
             try:
                 self.settings_store.save(self.settings)
             except OSError:
                 LOGGER.exception("Could not save preferences")
                 self._error("Settings could not be saved", "Your changes apply for this session but may not be remembered.")
+        if self.restart_previews_after_dialog:  # previews were deleted while Settings was open
+            self.restart_previews_after_dialog = False
+            self.start_saving_previews()  # does nothing when saving previews is off
+
+    # Freeing the space saved previews take ---------------------------------------
+
+    def deleting_previews(self) -> bool:
+        return bool(self.cache_job_deletes and self.cache_job and self.cache_job.is_alive())
+
+    def _start_cache_job(self, count_only: bool) -> None:
+        """Count (or delete) the saved previews off the UI thread; the result arrives as a cache event."""
+        if self.deleting_previews():
+            return
+        stop = self.cache_stop = threading.Event()
+        emit = self.cache_events.received.emit
+
+        def run():
+            try:
+                if count_only:
+                    emit({"stop": stop, "usage": cache_usage()})
+                else:
+                    emit({"stop": stop, "freed": delete_previews(stop)})
+                    emit({"stop": stop, "usage": cache_usage()})
+            except Exception:
+                LOGGER.exception("Could not %s saved previews", "count" if count_only else "delete")
+                emit({"stop": stop, "failed": not count_only})
+
+        self.cache_job = threading.Thread(target=run, daemon=True, name="preview-cache")
+        self.cache_job_deletes = not count_only
+        self.cache_job.start()
+
+    def _handle_cache_event(self, event: dict) -> None:
+        if event["stop"].is_set():
+            return  # an out-of-date count, or the window is closing
+        if "usage" in event:
+            self.cache_usage = event["usage"]
+            if self.preferences is not None:
+                self.preferences.set_cache_usage(self.cache_usage)
+        elif "freed" in event:
+            freed = event["freed"]
+            LOGGER.info("Deleted %d saved previews (%d bytes)", freed.files, freed.size)
+            self.status.setText(f"{self.ready_text}  ·  deleted saved previews, {format_file_size(freed.size)} freed")
+            # Remake them if they're still wanted, once Settings is closed (its checkbox may change that).
+            if self.preferences is None:
+                self.start_saving_previews()
+            else:
+                self.restart_previews_after_dialog = True
+        elif event.get("failed"):
+            if self.preferences is not None:
+                self.preferences.set_cache_usage(self.cache_usage)
+            self._error("Previews not deleted", "The saved previews could not be deleted. See the log for details.")
+
+    def _delete_previews_text(self) -> str:
+        if self.library_unavailable:
+            return ("The library's drive isn't connected, so the gallery will show no pictures until it is. "
+                    "Previews are saved again once the drive is back.")
+        if self.settings.save_previews:
+            return ("They're saved again in the background, which takes a while for a large library. Until "
+                    "then, the gallery can't show the library while its drive is disconnected.")
+        return ("Without them, the gallery can't show the library while its drive is disconnected, and "
+                "photos load more slowly as you scroll.")
+
+    def _confirm_delete_previews(self, parent: QWidget) -> None:
+        usage = self.cache_usage
+        if usage is None or not usage.files or self.deleting_previews():
+            return
+        dialog = QMessageBox(parent)
+        dialog.setIcon(QMessageBox.Icon.Warning)
+        dialog.setWindowTitle("Delete saved previews?")
+        dialog.setText(f"Delete all saved previews ({format_file_size(usage.size)})?")
+        dialog.setInformativeText(self._delete_previews_text() + " Your photos and videos aren't touched.")
+        delete_button = dialog.addButton("Delete Previews", QMessageBox.ButtonRole.DestructiveRole)
+        dialog.addButton(QMessageBox.StandardButton.Cancel)
+        dialog.setDefaultButton(QMessageBox.StandardButton.Cancel)
+        dialog.exec()
+        if dialog.clickedButton() is delete_button:
+            self._delete_previews()
+
+    def _offer_to_delete_previews(self) -> None:
+        """Turning previews off only stops new ones; offer to free the space the saved ones take."""
+        usage = self.cache_usage
+        if usage is None or not usage.files or self.deleting_previews():
+            return
+        dialog = QMessageBox(self)
+        dialog.setIcon(QMessageBox.Icon.Question)
+        dialog.setWindowTitle("Delete saved previews?")
+        dialog.setText(f"Also delete the previews already saved ({format_file_size(usage.size)})?")
+        dialog.setInformativeText(self._delete_previews_text() + " Your photos and videos aren't touched.")
+        delete_button = dialog.addButton("Delete Previews", QMessageBox.ButtonRole.DestructiveRole)
+        keep_button = dialog.addButton("Keep Them", QMessageBox.ButtonRole.RejectRole)
+        dialog.setDefaultButton(keep_button)
+        dialog.exec()
+        if dialog.clickedButton() is delete_button:
+            self._delete_previews()
+
+    def _delete_previews(self) -> None:
+        # Stop saving first, so the saver isn't remaking what is being deleted.
+        self.stop_saving_previews()
+        self.cache_stop.set()  # a count still running is out of date
+        if self.preferences is not None:
+            self.preferences.set_cache_usage(None, deleting=True)
+        self._start_cache_job(count_only=False)
 
     def _error(self, title: str, message: str) -> None:
         QMessageBox.critical(self, title, message)
@@ -730,6 +870,7 @@ class MainWindow(QMainWindow):
             self.stall_watch.stop()
         self.stop_event.set()
         self.stop_saving_previews()
+        self.cache_stop.set()
         self.analytics_pool.clear()
         self.gallery_pool.clear()
         self.gallery.shutdown()

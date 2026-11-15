@@ -268,21 +268,25 @@ class GalleryGrid(QAbstractScrollArea):
         painter.setBrush(QColor(127, 127, 127, 26))
         painter.drawRoundedRect(QRectF(preview), 7, 7)
         pixmap = self._pixmaps.get(_thumbnail_key(record))
+        image_rect = QRectF(preview)
         if isinstance(pixmap, QPixmap):
             size = pixmap.deviceIndependentSize()
             target = QRectF(0, 0, size.width(), size.height())
             target.moveCenter(QRectF(preview).center())
             painter.drawPixmap(target, pixmap, QRectF(pixmap.rect()))
+            image_rect = target
         elif pixmap is FAILED:
             painter.setFont(self._body_font)
             painter.setPen(QColor(c.text_muted))
             text = "No saved preview" if self.offline else (
                 "Video preview unavailable" if record.is_video else "Preview unavailable")
             painter.drawText(preview, Qt.AlignmentFlag.AlignCenter, text)
+        if record.is_live:
+            self._paint_live_badge(painter, image_rect)
 
         painter.setFont(self._caption_font)
         painter.setPen(QColor(c.text_subtle))
-        kind = "VIDEO" if record.is_video else "PHOTO"
+        kind = "VIDEO" if record.is_video else "LIVE PHOTO" if record.is_live else "PHOTO"
         painter.drawText(DATE_LINE.translated(cell.x, cell.y), Qt.AlignmentFlag.AlignVCenter,
                          f"{kind}  ·  {format_capture(record.captured_at, self.time_format)}")
 
@@ -311,6 +315,25 @@ class GalleryGrid(QAbstractScrollArea):
         painter.setBrush(hover_fill if self._is_hover(cell, "trash") and not self.read_only else Qt.BrushStyle.NoBrush)
         painter.drawRoundedRect(trash.adjusted(0.5, 0.5, -0.5, -0.5), Metrics.RADIUS_SMALL, Metrics.RADIUS_SMALL)
         painter.drawText(trash, Qt.AlignmentFlag.AlignCenter, TRASH_LABEL)
+
+    @staticmethod
+    def _paint_live_badge(painter: QPainter, rect: QRectF) -> None:
+        """The Live Photo mark, a dotted ring around a dot, in the image's top-left corner."""
+        painter.save()
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        centre = QPointF(rect.left() + 16, rect.top() + 16)
+        for colour, width in ((QColor(0, 0, 0, 90), 3.2), (QColor(255, 255, 255, 240), 1.6)):
+            pen = QPen(colour, width)
+            pen.setDashPattern([1.2, 1.4])
+            painter.setPen(pen)
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawEllipse(centre, 8.0, 8.0)
+            painter.setPen(QPen(colour, width - 0.4))
+            painter.drawEllipse(centre, 5.0, 5.0)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor(255, 255, 255, 240))
+        painter.drawEllipse(centre, 2.2, 2.2)
+        painter.restore()
 
     def _trash_rect(self, cell: Cell) -> QRectF:
         width = QFontMetrics(self._body_font).horizontalAdvance(TRASH_LABEL) + 22

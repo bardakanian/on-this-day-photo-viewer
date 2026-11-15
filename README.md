@@ -16,6 +16,8 @@ generation, search, and library analytics all stay on your computer.
 - Groups matching photos and videos by capture year for the selected month and day.
 - Browses the previous day, next day, or today's date from the main toolbar.
 - Filters the gallery to all media, photos only, or videos only.
+- Shows an iPhone Live Photo (a HEIC or JPG plus a MOV with the same name) once, with a
+  Live Photo badge, and plays its motion in the viewer.
 - Generates Retina-ready thumbnails away from the main interface and reuses cached results.
 - Keeps the interface responsive: date lookups, thumbnails, and photo decoding all happen
   in the background, and scans read capture dates in parallel.
@@ -82,7 +84,12 @@ Search and sort indexed videos without leaving the desktop app.
    in place of the original. Opening in another app, moving to the Trash, and playing
    videos wait until the drive is back. Previews take about 35 KB per item (roughly 3.5 GB
    for 100,000 items); turn them off under **Settings > Save a preview of every photo and
-   video**, and only items you've scrolled past keep one.
+   video**, and only items you've scrolled past keep one. Turning them off offers to delete
+   the ones already saved.
+
+   **Settings** shows how much space the saved previews take. **Delete All Previews…** frees it,
+   after asking first; your photos and videos aren't touched. If saving previews is still on,
+   they're saved again in the background.
 
 While a scan or saving previews runs, the status bar shows how far along it is and about
 how long is left, and a thin bar under the toolbar fills up. When it finishes, the status bar
@@ -203,6 +210,12 @@ open it the first time with right-click > **Open** (or System Settings > Privacy
 - Use the media filter to show all items, photos only, or videos only.
 - Select a thumbnail to open it in the viewer (see below).
 - Collapse or expand a year by selecting its heading.
+- **Live Photos:** an iPhone Live Photo exported as two files, such as `IMG_4330.HEIC` and
+  `IMG_4330.MOV`, shows once, as a photo with a Live Photo badge (a dotted ring) and the
+  label **LIVE PHOTO**, rather than as a photo plus a separate 1–3 second video. The files
+  are paired when they're in the same folder, share a name, and were taken within 5 seconds
+  of each other. The clip isn't counted in the Video Library, the Videos filter or Library
+  Insights. Moving a Live Photo to the Trash moves both files.
 - Right-click a card for **Open** and **Move to Trash**.
 
 ### Search the Video Library
@@ -225,6 +238,8 @@ and buttons for **Info**, **Open in Default App** and **Move to Trash**.
 - **Going back:** press **Esc** or select **‹ Back**. You return to the page you came
   from, at the same scroll position.
 
+- **Live Photos:** select **◉ LIVE** or press **L** to play the motion; the still comes
+  back when it ends. Press **L** or **Space** again to stop early.
 - **Details:** select **Info** or press **I** to open a side panel with the capture date
   and where it came from (photo or video metadata, Spotlight, or the file's own dates),
   dimensions, type, file size and full path. Videos also show their duration, frame rate
@@ -379,6 +394,7 @@ In the viewer:
 | Skip back / forward 5 seconds | `⇧←` / `⇧→` |
 | Mute | `M` |
 | Show or hide Info | `I` |
+| Play a Live Photo | `L` |
 | Zoom in / out | `⌘=` / `⌘−` |
 | Fit or actual size | `⌘0` |
 | Move to Trash | `⌘⌫` |
@@ -394,9 +410,11 @@ onthisday/
 │   ├── database.py       SQLite repository and Library Insights queries
 │   ├── gallery_layout.py Where the gallery's year headings and cards go
 │   ├── indexer.py        Recursive, incremental, parallel media indexing
+│   ├── live_photos.py    Pairs a Live Photo's still with its motion clip
 │   ├── media.py          Metadata detection, thumbnails, and viewer image decoding
 │   ├── metadata.py       Details for the viewer's Info panel (dimensions, video codec, …)
 │   ├── models.py         Shared immutable data models
+│   ├── preview_cache.py  Size of the saved previews, and deleting them
 │   ├── progress.py       Time-left estimates for scans and saving previews
 │   ├── settings.py       Local configuration persistence
 │   ├── thumbnail_warmer.py Saves a preview of every item in the background

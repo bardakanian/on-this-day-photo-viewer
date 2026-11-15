@@ -4,6 +4,7 @@ from datetime import date, datetime
 from pathlib import Path
 
 from .constants import APP_DIR, DB_FILE, THUMBNAIL_DIR
+from .live_photos import repair_live_photos
 from .models import AnalyticsResult, MediaRecord, PreviewItem, VideoRecord, YearMediaCount
 
 
@@ -28,6 +29,7 @@ def open_database() -> sqlite3.Connection:
             capture_day INTEGER,
             media_type TEXT DEFAULT 'image',
             video_metadata_version INTEGER DEFAULT 0,
+            live_pair TEXT,
             PRIMARY KEY (folder_root, file_path)
         )
     """)
@@ -36,6 +38,18 @@ def open_database() -> sqlite3.Connection:
         connection.execute("ALTER TABLE photos ADD COLUMN media_type TEXT DEFAULT 'image'")
     if "video_metadata_version" not in columns:
         connection.execute("ALTER TABLE photos ADD COLUMN video_metadata_version INTEGER DEFAULT 0")
+    if "live_pair" not in columns:
+        try:
+            connection.execute("ALTER TABLE photos ADD COLUMN live_pair TEXT")
+        except sqlite3.OperationalError as error:
+            # At first launch the gallery, Insights and a scan can open the index at the same moment;
+            # whichever adds the column first also pairs what's there.
+            if "duplicate column" not in str(error).lower():
+                raise
+        else:
+            # Pair the Live Photos already indexed, so they show once without waiting for a rescan.
+            for (folder_root,) in connection.execute("SELECT DISTINCT folder_root FROM photos").fetchall():
+                repair_live_photos(connection, folder_root)
     connection.execute("""
         CREATE INDEX IF NOT EXISTS idx_photos_date
         ON photos (folder_root, capture_month, capture_day, capture_year)
@@ -44,15 +58,21 @@ def open_database() -> sqlite3.Connection:
     return connection
 
 
+# A Live Photo's motion clip is shown as part of its photo, never as a video of its own.
+VISIBLE = "NOT (media_type = 'video' AND live_pair IS NOT NULL)"
+
+
 class MediaRepository:
     def remove(self, folder: Path, path: Path) -> bool:
-        """Remove one media item from a folder's index."""
+        """Remove one media item from a folder's index. If it was half of a Live Photo, the other
+        half is now a photo or video of its own."""
+        folder_root, file_path = str(folder.resolve()), str(path.resolve())
         connection = open_database()
         try:
             cursor = connection.execute(
-                "DELETE FROM photos WHERE folder_root = ? AND file_path = ?",
-                (str(folder.resolve()), str(path.resolve())),
-            )
+                "DELETE FROM photos WHERE folder_root = ? AND file_path = ?", (folder_root, file_path))
+            connection.execute("UPDATE photos SET live_pair = NULL WHERE folder_root = ? AND live_pair = ?",
+                               (folder_root, file_path))
             connection.commit()
             return cursor.rowcount > 0
         finally:
@@ -62,9 +82,9 @@ class MediaRepository:
         """Every indexed item in the folder, for saving previews in the background."""
         connection = open_database()
         try:
-            rows = connection.execute("""
+            rows = connection.execute(f"""
                 SELECT file_path, media_type, file_size, modified_ns, capture_month, capture_day
-                FROM photos WHERE folder_root = ?
+                FROM photos WHERE folder_root = ? AND {VISIBLE}
             """, (str(folder.resolve()),)).fetchall()
         finally:
             connection.close()
@@ -83,9 +103,10 @@ class MediaRepository:
             # There is no February 29 this year, so leap-day media shows up a day early instead.
             days.append(29)
         sql = f"""
-            SELECT file_path, capture_ts, media_type, file_size, modified_ns
+            SELECT file_path, capture_ts, media_type, file_size, modified_ns, live_pair
             FROM photos
             WHERE folder_root = ? AND capture_month = ? AND capture_day IN ({", ".join("?" * len(days))})
+              AND {VISIBLE}
         """
         params: list[object] = [str(folder.resolve()), selected_date.month, *days]
         if media_filter == "Photos":
@@ -96,7 +117,7 @@ class MediaRepository:
         connection = open_database()
         try:
             records = []
-            for file_path, capture_ts, media_type, file_size, modified_ns in connection.execute(sql, params):
+            for file_path, capture_ts, media_type, file_size, modified_ns, live_pair in connection.execute(sql, params):
                 path = Path(file_path)
                 if check_files and not path.exists():
                     continue
@@ -104,7 +125,11 @@ class MediaRepository:
                     captured_at = datetime.fromisoformat(capture_ts)
                 except (TypeError, ValueError):
                     continue
-                records.append(MediaRecord(path, captured_at, media_type or "image", file_size, modified_ns))
+                live_video = Path(live_pair) if live_pair and media_type != "video" else None
+                if check_files and live_video is not None and not live_video.exists():
+                    live_video = None  # the clip is gone: show the still on its own
+                records.append(MediaRecord(path, captured_at, media_type or "image", file_size, modified_ns,
+                                           live_video))
             return records
         finally:
             connection.close()
@@ -112,10 +137,10 @@ class MediaRepository:
     def all_videos(self, folder: Path) -> list[VideoRecord]:
         connection = open_database()
         try:
-            rows = connection.execute("""
+            rows = connection.execute(f"""
                 SELECT file_path, capture_ts, file_size, modified_ns
                 FROM photos
-                WHERE folder_root = ? AND media_type = 'video'
+                WHERE folder_root = ? AND media_type = 'video' AND {VISIBLE}
                 ORDER BY capture_year DESC, capture_month DESC, capture_day DESC,
                          capture_ts DESC, file_path ASC
             """, (str(folder.resolve()),)).fetchall()
@@ -133,17 +158,17 @@ class MediaRepository:
         folder_root = str(folder.resolve())
         connection = open_database()
         try:
-            combined, videos = connection.execute("""
+            combined, videos = connection.execute(f"""
                 SELECT COUNT(*),
                        COALESCE(SUM(CASE WHEN media_type = 'video' THEN 1 ELSE 0 END), 0)
                 FROM photos
-                WHERE folder_root = ?
+                WHERE folder_root = ? AND {VISIBLE}
             """, (folder_root,)).fetchone()
 
-            busiest_row = connection.execute("""
+            busiest_row = connection.execute(f"""
                 SELECT capture_month, capture_day, COUNT(*) AS media_count
                 FROM photos
-                WHERE folder_root = ?
+                WHERE folder_root = ? AND {VISIBLE}
                   AND capture_month IS NOT NULL
                   AND capture_day IS NOT NULL
                 GROUP BY capture_month, capture_day
@@ -151,12 +176,12 @@ class MediaRepository:
                 LIMIT 1
             """, (folder_root,)).fetchone()
 
-            year_rows = connection.execute("""
+            year_rows = connection.execute(f"""
                 SELECT capture_year,
                        SUM(CASE WHEN media_type = 'video' THEN 0 ELSE 1 END) AS photos,
                        SUM(CASE WHEN media_type = 'video' THEN 1 ELSE 0 END) AS videos
                 FROM photos
-                WHERE folder_root = ? AND capture_year IS NOT NULL
+                WHERE folder_root = ? AND {VISIBLE} AND capture_year IS NOT NULL
                 GROUP BY capture_year
                 ORDER BY capture_year ASC
             """, (folder_root,)).fetchall()
@@ -164,10 +189,10 @@ class MediaRepository:
                                   for year, photos, year_videos in year_rows)
             largest = min(media_by_year, key=lambda item: (-item.total, item.year), default=None)
 
-            month_row = connection.execute("""
+            month_row = connection.execute(f"""
                 SELECT capture_month, COUNT(*) AS media_count
                 FROM photos
-                WHERE folder_root = ? AND capture_month IS NOT NULL
+                WHERE folder_root = ? AND {VISIBLE} AND capture_month IS NOT NULL
                 GROUP BY capture_month
                 ORDER BY media_count DESC, capture_month ASC
                 LIMIT 1
