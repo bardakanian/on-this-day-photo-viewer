@@ -1,5 +1,6 @@
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QKeySequence, QPixmap, QShortcut
+from PySide6.QtMultimedia import QMediaPlayer
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QStackedWidget, QVBoxLayout, QWidget
 
 from ...core.media import read_only_trash_reason
@@ -43,6 +44,7 @@ class ViewerPage(QWidget):
         self._placeholder_done = False
         self.offline = False  # the library's drive is disconnected: saved previews only
         self.read_only = False  # the library's drive can't be changed: nothing can be moved to the Trash
+        self._live_playing = False  # a Live Photo's motion clip is playing over its still
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -83,6 +85,10 @@ class ViewerPage(QWidget):
         self.fit_button = self._button("100%", f"Actual size ({native_keys('Ctrl+0')})")
         self.fit_button.clicked.connect(lambda: self.canvas.toggle_actual_size())
         bar.addWidget(self.fit_button)
+        self.live_button = self._button("◉ LIVE", "Play the Live Photo (L)")
+        self.live_button.clicked.connect(self.play_live)
+        self.live_button.hide()
+        bar.addWidget(self.live_button)
         self.position_label = QLabel()
         self.position_label.setProperty("muted", True)
         self.position_label.setMinimumWidth(80)
@@ -108,6 +114,8 @@ class ViewerPage(QWidget):
         self.canvas.needs_full_resolution.connect(self._request_full_resolution)
         self.video = VideoPlayer()
         self.video.open_externally_requested.connect(self._open_externally)
+        self.video.player.mediaStatusChanged.connect(self._live_status)
+        self.video.player.errorOccurred.connect(self._live_failed)
         self.content.addWidget(self.canvas)
         self.content.addWidget(self.video)
         self.info_panel = InfoPanel()
@@ -139,6 +147,7 @@ class ViewerPage(QWidget):
         shortcut("Ctrl+0", self.canvas.toggle_actual_size)
         shortcut("Ctrl+Backspace", self._trash_current)
         shortcut("I", self.info_button.toggle)
+        shortcut("L", self.play_live)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
 
     @staticmethod
@@ -163,9 +172,10 @@ class ViewerPage(QWidget):
         be opened elsewhere or moved to the Trash."""
         self.offline = offline
         self.read_only = read_only
-        for button in (self.open_button, self.trash_button):
+        for button in (self.open_button, self.trash_button, self.live_button):
             button.setEnabled(not offline)
         reason = "The library's drive isn't connected"
+        self.live_button.setToolTip(reason if offline else "Play the Live Photo (L)")
         self.open_button.setToolTip(reason if offline else "Open in the default app")
         self.trash_button.setEnabled(not offline and not read_only)
         self.trash_button.setToolTip(reason if offline else read_only_trash_reason() if read_only
@@ -192,6 +202,8 @@ class ViewerPage(QWidget):
 
     def stop(self) -> None:
         """Stop playback and release the video file."""
+        if self._live_playing:
+            self._end_live()
         self.video.stop()
 
     def remove_current(self) -> None:
@@ -238,6 +250,11 @@ class ViewerPage(QWidget):
         if item is None:
             return
         self._update_labels(item)
+        self._live_playing = False
+        self.zoom_label.show()
+        self.live_button.setVisible(item.is_live and not item.is_video)
+        self.live_button.setEnabled(not self.offline)
+        self.live_button.setToolTip("The library's drive isn't connected" if self.offline else "Play the Live Photo (L)")
         self._full_requested = False
         self._original_failed = self._placeholder_done = False
         if item.is_video:
@@ -366,9 +383,46 @@ class ViewerPage(QWidget):
         self.fit_button.setText("100%" if self.canvas.is_fitted else "Fit")
         self.fit_button.setToolTip(f"{'Actual size' if self.canvas.is_fitted else 'Zoom to fit'} ({native_keys('Ctrl+0')})")
 
+    # Live Photos --------------------------------------------------------------
+
+    def play_live(self) -> None:
+        """Play a Live Photo's motion clip over the photo, then return to the still. Pressed
+        again while the clip plays, it returns to the still at once."""
+        item = self.current_item
+        if item is None or not item.is_live or item.is_video or self.offline:
+            return
+        if self._live_playing:
+            self._end_live()
+            return
+        self._live_playing = True
+        self.fit_button.hide()
+        self.zoom_label.hide()
+        self.content.setCurrentWidget(self.video)
+        self.video.load(item.live_video)
+
+    def _live_status(self, status) -> None:
+        if self._live_playing and status == QMediaPlayer.MediaStatus.EndOfMedia:
+            self._end_live()
+
+    def _live_failed(self, *_args) -> None:
+        if self._live_playing:
+            # The clip can't be played here: keep showing the still rather than an error about a video.
+            self._end_live()
+            self.live_button.setEnabled(False)
+            self.live_button.setToolTip("This Live Photo's video can't be played")
+
+    def _end_live(self) -> None:
+        self._live_playing = False
+        self.video.stop()
+        self.fit_button.show()
+        self.zoom_label.show()
+        self.content.setCurrentWidget(self.canvas)
+
     def _space(self) -> None:
         item = self.current_item
-        if item is not None and item.is_video:
+        if self._live_playing:
+            self._end_live()
+        elif item is not None and item.is_video:
             self.video.toggle_play()
         else:
             self.close_viewer()

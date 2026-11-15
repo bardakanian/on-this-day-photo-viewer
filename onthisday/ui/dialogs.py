@@ -1,9 +1,15 @@
-from PySide6.QtWidgets import QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFormLayout, QLabel, QVBoxLayout
+from PySide6.QtCore import Signal
+from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFormLayout, QHBoxLayout, QLabel,
+                               QPushButton, QVBoxLayout)
 
+from ..core.metadata import format_file_size
+from ..core.preview_cache import CacheUsage
 from ..core.timeformat import TIME_12_HOUR, TIME_24_HOUR
 
 
 class PreferencesDialog(QDialog):
+    delete_previews_requested = Signal()
+
     def __init__(self, current_theme: str, save_previews: bool = True, current_time_format: str = TIME_12_HOUR,
                  parent=None):
         super().__init__(parent)
@@ -54,10 +60,34 @@ class PreferencesDialog(QDialog):
         previews_note.setProperty("muted", True)
         previews_note.setWordWrap(True)
         layout.addWidget(previews_note)
+        cache_row = QHBoxLayout()
+        cache_row.setSpacing(12)
+        self.cache_label = QLabel("Saved previews: counting…")
+        self.cache_label.setWordWrap(True)
+        cache_row.addWidget(self.cache_label, 1)
+        self.delete_previews = QPushButton("Delete All Previews…")
+        self.delete_previews.setToolTip("Delete every saved preview to free disk space")
+        self.delete_previews.setEnabled(False)  # until the cache has been counted
+        self.delete_previews.clicked.connect(self.delete_previews_requested)
+        cache_row.addWidget(self.delete_previews)
+        layout.addLayout(cache_row)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Cancel | QDialogButtonBox.StandardButton.Save)
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
+
+    def set_cache_usage(self, usage: CacheUsage | None, deleting: bool = False) -> None:
+        """Show how much the saved previews take; None while they're being counted."""
+        if deleting:
+            self.cache_label.setText("Saved previews: deleting…")
+        elif usage is None:
+            self.cache_label.setText("Saved previews: counting…")
+        elif usage.files == 0:
+            self.cache_label.setText("Saved previews: none")
+        else:
+            noun = "file" if usage.files == 1 else "files"
+            self.cache_label.setText(f"Saved previews: {format_file_size(usage.size)} ({usage.files:,} {noun})")
+        self.delete_previews.setEnabled(not deleting and usage is not None and usage.files > 0)
 
     @property
     def selected_theme(self) -> str:

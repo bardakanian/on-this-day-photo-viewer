@@ -10,10 +10,15 @@ class MediaRecord:
     media_type: str
     file_size: int
     modified_ns: int
+    live_video: Path | None = None  # for a Live Photo: its motion clip
 
     @property
     def is_video(self) -> bool:
         return self.media_type == "video"
+
+    @property
+    def is_live(self) -> bool:
+        return self.live_video is not None
 
 
 @dataclass(frozen=True, slots=True)
@@ -72,10 +77,15 @@ class ViewerItem:
     media_type: str
     file_size: int
     modified_ns: int
+    live_video: Path | None = None  # for a Live Photo: its motion clip
 
     @property
     def is_video(self) -> bool:
         return self.media_type == "video"
+
+    @property
+    def is_live(self) -> bool:
+        return self.live_video is not None
 
     @property
     def key(self) -> tuple[str, int]:
@@ -83,7 +93,8 @@ class ViewerItem:
 
     @classmethod
     def from_media(cls, record: MediaRecord) -> "ViewerItem":
-        return cls(record.path, record.captured_at, record.media_type, record.file_size, record.modified_ns)
+        return cls(record.path, record.captured_at, record.media_type, record.file_size, record.modified_ns,
+                   record.live_video)
 
     @classmethod
     def from_video(cls, record: VideoRecord) -> "ViewerItem":

@@ -6,7 +6,8 @@ from pathlib import Path
 from typing import Callable, Iterator
 
 from .constants import BATCH_COMMIT_SIZE, SUPPORTED_EXTENSIONS, VIDEO_METADATA_VERSION
-from .database import open_database
+from .database import VISIBLE, open_database
+from .live_photos import repair_live_photos
 from .media import HEIC_ENABLED, get_capture_date, media_type_for_path, prune_thumbnail_cache
 
 METADATA_WORKERS = min(8, os.cpu_count() or 4)
@@ -97,7 +98,8 @@ class MediaIndexer:
                 for future in done:
                     store(future)
 
-            self.send("scan_started")
+            # The last scan's count stands in for the total, which is only known once the walk ends.
+            self.send("scan_started", expected=len(cached))
             for path in media_candidates(self.folder):
                 if self.stop_event.is_set():
                     self.send("scan_cancelled")
@@ -148,19 +150,25 @@ class MediaIndexer:
                     return
                 connection.execute("DELETE FROM photos WHERE folder_root=? AND file_path=?", (self.folder_root, file_path))
                 deleted += 1
+            live_photos = repair_live_photos(connection, self.folder_root)
             connection.commit()
-            total = connection.execute("SELECT COUNT(*) FROM photos WHERE folder_root=?", (self.folder_root,)).fetchone()[0]
+            total = connection.execute(f"SELECT COUNT(*) FROM photos WHERE folder_root=? AND {VISIBLE}",
+                                       (self.folder_root,)).fetchone()[0]
             videos = connection.execute(
-                "SELECT COUNT(*) FROM photos WHERE folder_root=? AND media_type='video'", (self.folder_root,)
+                f"SELECT COUNT(*) FROM photos WHERE folder_root=? AND media_type='video' AND {VISIBLE}",
+                (self.folder_root,),
             ).fetchone()[0]
             try:
-                # Thumbnails of edited, moved, or removed files are never shown again. Rows of every
-                # folder are kept, so switching back to another library doesn't regenerate its previews.
-                prune_thumbnail_cache(connection.execute("SELECT file_path, file_size, modified_ns FROM photos"))
+                # Thumbnails of edited, moved, or removed files are never shown again, nor are those of
+                # Live Photo clips. Rows of every folder are kept, so switching back to another library
+                # doesn't regenerate its previews.
+                prune_thumbnail_cache(connection.execute(
+                    f"SELECT file_path, file_size, modified_ns FROM photos WHERE {VISIBLE}"))
             except (OSError, sqlite3.Error):
                 pass
             self.send("scan_complete", scanned=scanned, updated=updated, unchanged=unchanged,
-                      deleted=deleted, errors=errors, total_indexed=total, total_videos=videos)
+                      deleted=deleted, errors=errors, total_indexed=total, total_videos=videos,
+                      live_photos=live_photos)
         except Exception as exc:
             self.send("scan_error", message=str(exc))
         finally:

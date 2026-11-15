@@ -16,6 +16,13 @@ from onthisday.core import database, indexer, media, settings
 from onthisday.core.indexer import MediaIndexer
 from onthisday.core.settings import SettingsStore
 
+# The ten columns every index has had since version 1; newer ones keep their defaults.
+INSERT_ROW = """
+    INSERT INTO photos (folder_root, file_path, file_size, modified_ns, capture_ts, capture_year,
+                        capture_month, capture_day, media_type, video_metadata_version)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+"""
+
 
 class StorageTests(unittest.TestCase):
     def setUp(self):
@@ -66,7 +73,7 @@ class StorageTests(unittest.TestCase):
             (folder_root, str(photo), 1, 1, "2025-09-13T08:00:00", 2025, 9, 13, "image", 0),
             (folder_root, str(video), 1, 1, "2024-09-13T09:00:00", 2024, 9, 13, "video", 5),
         ]
-        connection.executemany("INSERT INTO photos VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", rows)
+        connection.executemany(INSERT_ROW, rows)
         connection.commit()
         connection.close()
         repository = database.MediaRepository()
@@ -89,7 +96,7 @@ class StorageTests(unittest.TestCase):
             (str(first.resolve()), str(first_photo.resolve()), 1, 1, "2025-09-13T08:00:00", 2025, 9, 13, "image", 0),
             (str(second.resolve()), str(second_photo.resolve()), 1, 1, "2025-09-13T08:00:00", 2025, 9, 13, "image", 0),
         ]
-        connection.executemany("INSERT INTO photos VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", rows)
+        connection.executemany(INSERT_ROW, rows)
         connection.commit()
         connection.close()
 
@@ -277,7 +284,7 @@ class StorageTests(unittest.TestCase):
         stat = photo.stat()
         # A row written by the old version: dated by the copy time, version 0.
         connection = database.open_database()
-        connection.execute("INSERT INTO photos VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", (
+        connection.execute(INSERT_ROW, (
             str(library.resolve()), str(photo.resolve()), stat.st_size, stat.st_mtime_ns,
             "2026-06-26T18:09:53", 2026, 6, 26, "image", 0,
         ))
@@ -310,7 +317,7 @@ class StorageTests(unittest.TestCase):
                 folder_root, str(folder / f"media-{index}"), index + 1, index + 1,
                 timestamp, year, month, day, media_type, 0,
             ))
-        connection.executemany("INSERT INTO photos VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", values)
+        connection.executemany(INSERT_ROW, values)
         connection.commit()
         connection.close()
 
