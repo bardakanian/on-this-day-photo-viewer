@@ -66,6 +66,28 @@ def records(year: int, count: int) -> list[MediaRecord]:
             for index in range(count)]
 
 
+class PinnedHeaderTests(unittest.TestCase):
+    """The year scrolling past stays at the top of the screen."""
+
+    def setUp(self):
+        self.layout = layout_sections([20, 20], [False, False], CARD_WIDTH)  # one column
+        self.first, self.second = self.layout.headers
+
+    def test_nothing_pinned_while_the_header_is_in_view(self):
+        self.assertIsNone(self.layout.pinned_header(0))
+
+    def test_header_follows_the_top_of_the_screen(self):
+        pinned = self.layout.pinned_header(1000)
+        self.assertEqual((pinned.section, pinned.y), (0, 1000))
+        self.assertTrue(pinned.is_header)
+
+    def test_next_header_pushes_it_up_then_takes_over(self):
+        top = self.second.y - HEADER_HEIGHT // 2  # the next header is half way up the pinned one
+        self.assertEqual(self.layout.pinned_header(top).y, self.second.y - HEADER_HEIGHT)
+        self.assertIsNone(self.layout.pinned_header(self.second.y))  # its own header is at the top
+        self.assertEqual(self.layout.pinned_header(self.second.y + 1).section, 1)
+
+
 class GridTests(unittest.TestCase):
     def setUp(self):
         self.page = GalleryPage()
@@ -132,6 +154,16 @@ class GridTests(unittest.TestCase):
         self.assertEqual(self.grid.verticalScrollBar().value(), 5000)  # one deleted, same place
         self.page.show_records(records(2024, 10), date(2026, 5, 2), "All", Path("/library"))
         self.assertEqual(self.grid.verticalScrollBar().value(), 0)  # a different day starts at the top
+
+    def test_pinned_header_collapses_its_year_without_scrolling_up(self):
+        self.grid.verticalScrollBar().setValue(5000)  # deep inside 2024
+        self.paint()
+        self.click(20, HEADER_HEIGHT / 2)  # the top of the screen: 2024's pinned header, not a card
+        self.assertEqual(self.grid.collapsed, {2024})
+        self.assertEqual(self.grid.verticalScrollBar().value(), 0)  # its header is back at the top
+        self.paint()
+        self.click(20, HEADER_HEIGHT / 2)  # and it can be expanded again from there
+        self.assertEqual(self.grid.collapsed, set())
 
     def test_read_only_drive_dims_trash_instead_of_asking(self):
         deleted = []

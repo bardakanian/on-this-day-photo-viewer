@@ -175,7 +175,13 @@ class GalleryGrid(QAbstractScrollArea):
 
     def toggle_section(self, year: int) -> None:
         self.collapsed ^= {year}
+        header = next((cell for cell in self.layout_.cells
+                       if cell.is_header and self.sections[cell.section][0] == year), None)
         self._relayout()
+        # Toggled from the pinned header: its year started above the screen. Bring its header to the
+        # top, so a collapse doesn't leave you somewhere in a later year (sections above don't move).
+        if header is not None and header.y < self._offset():
+            self.verticalScrollBar().setValue(header.y)
 
     def record_for(self, cell: Cell) -> MediaRecord | None:
         if cell.is_header or not 0 <= cell.section < len(self.sections):
@@ -226,6 +232,14 @@ class GalleryGrid(QAbstractScrollArea):
                 record = self.record_for(cell)
                 if record is not None:
                     self._paint_card(painter, cell, record)
+        pinned = self.layout_.pinned_header(offset)
+        if pinned is not None:
+            # Over the cards scrolling beneath it, so the year stays in view and can be collapsed.
+            band = QRectF(0, pinned.y, self.viewport().width(), pinned.height)
+            painter.fillRect(band, QColor(self.colors.background))
+            painter.setPen(QColor(self.colors.border))
+            painter.drawLine(band.bottomLeft(), band.bottomRight())
+            self._paint_header(painter, pinned)
         painter.end()
         # Load what is on screen plus about a screen below, the likeliest next stop.
         self._request_thumbnails(self.layout_.visible(offset - height // 2, offset + 2 * height))
@@ -409,6 +423,9 @@ class GalleryGrid(QAbstractScrollArea):
 
     def _target(self, position: QPointF) -> tuple[Cell, str] | None:
         x, y = position.x(), position.y() + self._offset()
+        pinned = self.layout_.pinned_header(self._offset())
+        if pinned is not None and pinned.contains(x, y):
+            return pinned, "header"
         cell = self.layout_.cell_at(x, y)
         if cell is None:
             return None

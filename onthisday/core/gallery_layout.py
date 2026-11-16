@@ -4,7 +4,7 @@ The gallery draws only the cells that intersect the visible area, so a day with 
 items scrolls as smoothly as a day with ten.
 """
 
-from bisect import bisect_right
+from bisect import bisect_left, bisect_right
 from dataclasses import dataclass
 
 CARD_WIDTH = 264
@@ -42,6 +42,7 @@ class GalleryLayout:
     height: int
     columns: int
     bottoms: tuple[int, ...]  # each cell's bottom edge; non-decreasing, so it can be bisected
+    headers: tuple[Cell, ...] = ()  # one per section, top to bottom
 
     def visible(self, top: float, bottom: float) -> list[Cell]:
         """Cells that overlap the band from `top` to `bottom`."""
@@ -53,6 +54,25 @@ class GalleryLayout:
                 break
             result.append(cell)
         return result
+
+    def pinned_header(self, top: float) -> Cell | None:
+        """The header to keep at the top of the screen while its year scrolls past, if any.
+
+        It's the header of the section showing at `top`, once that header has scrolled out of
+        view, placed at `top`, except that the next section's header pushes it up as it arrives.
+        Positions are in content coordinates, like every other cell's.
+        """
+        headers = self.headers
+        current = bisect_left([header.y for header in headers], top) - 1  # the last one above `top`
+        if current < 0:
+            return None
+        header = headers[current]
+        y = top
+        if current + 1 < len(headers):
+            y = min(y, headers[current + 1].y - header.height)
+        if y <= header.y or y + header.height <= top:
+            return None  # the real header is still where it belongs, or the next one has pushed it off
+        return Cell(header.section, -1, header.x, int(y), header.width, header.height)
 
     def cell_at(self, x: float, y: float) -> Cell | None:
         for cell in self.visible(y, y + 1):
@@ -84,4 +104,5 @@ def layout_sections(counts: list[int], collapsed: list[bool], width: int) -> Gal
                               CARD_WIDTH, CARD_HEIGHT))
         rows = (count + columns - 1) // columns
         y += rows * CARD_HEIGHT + (rows - 1) * SPACING
-    return GalleryLayout(tuple(cells), y + BOTTOM_MARGIN if cells else 0, columns, tuple(cell.bottom for cell in cells))
+    return GalleryLayout(tuple(cells), y + BOTTOM_MARGIN if cells else 0, columns, tuple(cell.bottom for cell in cells),
+                         tuple(cell for cell in cells if cell.is_header))

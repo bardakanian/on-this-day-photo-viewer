@@ -2,6 +2,10 @@
 
 With every change, bump `VERSION` in `onthisday/core/constants.py` and add an entry here.
 
+## 1.17.0 — 2026-11-15
+
+- While you scroll through a year in the gallery, its heading (the year and its item count) stays pinned at the top. Click it to collapse that year without scrolling back up; the gallery then jumps to the collapsed year, so you don't lose your place. The next year's heading pushes it up as it arrives.
+
 ## 1.16.0 — 2026-11-15
 
 - A gear button at the right end of the toolbar opens **Settings**. Before, Settings was only in the menu bar (⌘,). The gear follows the light or dark theme.
