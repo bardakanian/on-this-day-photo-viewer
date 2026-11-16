@@ -716,7 +716,8 @@ class MainWindow(QMainWindow):
                 f"  previews={'saving' if self.saving_previews() else 'idle'}")
 
     def show_preferences(self) -> None:
-        dialog = PreferencesDialog(self.settings.theme, self.settings.save_previews, self.settings.time_format, self)
+        dialog = PreferencesDialog(self.settings.theme, self.settings.save_previews, self.settings.time_format, self,
+                                   auto_rescan=self.settings.auto_rescan)
         dialog.delete_previews_requested.connect(lambda: self._confirm_delete_previews(dialog))
         self.preferences = dialog
         if self.deleting_previews():
@@ -733,6 +734,7 @@ class MainWindow(QMainWindow):
             self.theme.apply(self.settings.theme)
             self.settings.time_format = dialog.selected_time_format
             self._apply_time_format()
+            self.settings.auto_rescan = dialog.selected_auto_rescan
             if dialog.selected_save_previews != self.settings.save_previews:
                 self.settings.save_previews = dialog.selected_save_previews
                 if self.settings.save_previews:
@@ -859,6 +861,8 @@ class MainWindow(QMainWindow):
 
     def rescan_if_stale(self) -> None:
         """Re-check the library when returning to the app, at most every AUTO_RESCAN_SECONDS."""
+        if not self.settings.auto_rescan:
+            return  # turned off in Settings: only Rescan checks the library
         # While the library is unavailable, every return checks whether its drive is back. The check
         # runs on the scan's thread, since a disconnected network share can take a while to answer.
         if self.library_unavailable or time.monotonic() - self.last_scan_finished >= AUTO_RESCAN_SECONDS:

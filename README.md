@@ -74,7 +74,8 @@ Search and sort indexed videos without leaving the desktop app.
    folder is unavailable, such as an unplugged drive, or contains no media at all,
    the scan leaves the existing index untouched.
 5. The library is checked again when you come back to the app after 10 minutes or more,
-   or when you choose **Rescan**. Opening the app shows the saved index without scanning. If the
+   or when you choose **Rescan** (the automatic check can be turned off in Settings). Opening
+   the app shows the saved index without scanning. If the
    library's drive isn't connected, the gallery keeps the folder and shows the photos again
    as soon as the drive is back.
 6. When the app opens and after each scan, a preview of every item is saved in the background, starting with the
@@ -204,7 +205,9 @@ open it the first time with right-click > **Open** (or System Settings > Privacy
 
 - Use **Choose Folder** to select or change the active media library.
 - The library refreshes itself when you return to the app after 10 minutes; use **Rescan**
-  to check right away after adding, moving, editing, or removing files.
+  to check right away after adding, moving, editing, or removing files. To stop these
+  automatic checks, turn off **Settings > Check the library for changes when I return to
+  the app**; then only **Rescan** scans the library.
 - Use the arrow controls to browse adjacent dates or **Today** to return to the
   current date.
 - Use the media filter to show all items, photos only, or videos only.
@@ -463,7 +466,8 @@ For this checkout, the project virtual environment can be used directly:
 - **Video dates or thumbnails are unavailable:** confirm that `imageio-ffmpeg` is
   installed, then rescan the library.
 - **Recently changed media is not visible:** the library refreshes when you return to
-  the app after 10 minutes; use **Rescan** to refresh it now.
+  the app after 10 minutes (unless that's turned off in Settings); use **Rescan** to
+  refresh it now.
 - **"Library drive not connected":** connect the drive or network share that holds the
   library. Meanwhile the gallery shows saved previews; the originals come back when you
   return to the app. **"Library folder unavailable"** means nothing from that day has been

@@ -11,7 +11,7 @@ class PreferencesDialog(QDialog):
     delete_previews_requested = Signal()
 
     def __init__(self, current_theme: str, save_previews: bool = True, current_time_format: str = TIME_12_HOUR,
-                 parent=None):
+                 parent=None, auto_rescan: bool = True):
         super().__init__(parent)
         self.setWindowTitle("Settings")
         self.setModal(True)
@@ -49,6 +49,16 @@ class PreferencesDialog(QDialog):
         library = QLabel("Library")
         library.setProperty("role", "section")
         layout.addWidget(library)
+        self.auto_rescan = QCheckBox("Check the library for changes when I return to the app")
+        self.auto_rescan.setChecked(auto_rescan)
+        layout.addWidget(self.auto_rescan)
+        rescan_note = QLabel(
+            "At most every 10 minutes, and each time while the library's drive is disconnected. "
+            "When this is off, the library is only checked when you choose Rescan."
+        )
+        rescan_note.setProperty("muted", True)
+        rescan_note.setWordWrap(True)
+        layout.addWidget(rescan_note)
         self.save_previews = QCheckBox("Save a preview of every photo and video")
         self.save_previews.setChecked(save_previews)
         layout.addWidget(self.save_previews)
@@ -96,6 +106,10 @@ class PreferencesDialog(QDialog):
     @property
     def selected_save_previews(self) -> bool:
         return self.save_previews.isChecked()
+
+    @property
+    def selected_auto_rescan(self) -> bool:
+        return self.auto_rescan.isChecked()
 
     @property
     def selected_time_format(self) -> str:
