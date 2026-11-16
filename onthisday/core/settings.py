@@ -12,6 +12,7 @@ class AppSettings:
     theme: str = "system"
     save_previews: bool = True  # a preview of every item, for browsing while the drive is disconnected
     time_format: str = DEFAULT_TIME_FORMAT
+    auto_rescan: bool = True  # re-check the library when returning to the app
 
 
 class SettingsStore:
@@ -37,7 +38,8 @@ class SettingsStore:
         time_format = data.get("time_format", DEFAULT_TIME_FORMAT)
         if time_format not in TIME_FORMATS:
             time_format = DEFAULT_TIME_FORMAT
-        return AppSettings(folder, theme, data.get("save_previews", True) is not False, time_format)
+        return AppSettings(folder, theme, data.get("save_previews", True) is not False, time_format,
+                           data.get("auto_rescan", True) is not False)
 
     def save(self, settings: AppSettings) -> None:
         APP_DIR.mkdir(parents=True, exist_ok=True)
@@ -53,5 +55,6 @@ class SettingsStore:
             "theme": settings.theme,
             "save_previews": settings.save_previews,
             "time_format": settings.time_format,
+            "auto_rescan": settings.auto_rescan,
         })
         CONFIG_FILE.write_text(json.dumps(existing, indent=2), encoding="utf-8")

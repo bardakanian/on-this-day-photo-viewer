@@ -26,6 +26,7 @@ from .dialogs import PreferencesDialog
 from .notifications import notify
 from .pages import GalleryPage, LibraryInsightsPage, VideosPage, ViewerPage
 from .theme import ThemeManager
+from .widgets.icons import gear_icon
 
 LOGGER = logging.getLogger(__name__)
 
@@ -223,6 +224,14 @@ class MainWindow(QMainWindow):
         date_layout.addSpacing(6)
         date_layout.addWidget(self.filter_box)
         toolbar_layout.addWidget(self.date_navigation)
+        self.settings_button = QPushButton()
+        self.settings_button.setAccessibleName("Settings")
+        self.settings_button.setToolTip("Settings")
+        self.settings_button.setProperty("compact", True)
+        self.settings_button.setIcon(gear_icon(self.theme.colors.text))
+        self.settings_button.clicked.connect(self.show_preferences)
+        toolbar_layout.addSpacing(6)
+        toolbar_layout.addWidget(self.settings_button)
         root_layout.addWidget(toolbar)
 
         self.progress = QProgressBar()
@@ -463,6 +472,7 @@ class MainWindow(QMainWindow):
     def _theme_changed(self, _preference: str) -> None:
         self.insights.set_theme_colors(self.theme.colors)
         self.gallery.set_theme_colors(self.theme.colors)
+        self.settings_button.setIcon(gear_icon(self.theme.colors.text))
 
     def _page_changed(self, index: int) -> None:
         page = self.stack.widget(index)
@@ -716,7 +726,8 @@ class MainWindow(QMainWindow):
                 f"  previews={'saving' if self.saving_previews() else 'idle'}")
 
     def show_preferences(self) -> None:
-        dialog = PreferencesDialog(self.settings.theme, self.settings.save_previews, self.settings.time_format, self)
+        dialog = PreferencesDialog(self.settings.theme, self.settings.save_previews, self.settings.time_format, self,
+                                   auto_rescan=self.settings.auto_rescan)
         dialog.delete_previews_requested.connect(lambda: self._confirm_delete_previews(dialog))
         self.preferences = dialog
         if self.deleting_previews():
@@ -733,6 +744,7 @@ class MainWindow(QMainWindow):
             self.theme.apply(self.settings.theme)
             self.settings.time_format = dialog.selected_time_format
             self._apply_time_format()
+            self.settings.auto_rescan = dialog.selected_auto_rescan
             if dialog.selected_save_previews != self.settings.save_previews:
                 self.settings.save_previews = dialog.selected_save_previews
                 if self.settings.save_previews:
@@ -859,6 +871,8 @@ class MainWindow(QMainWindow):
 
     def rescan_if_stale(self) -> None:
         """Re-check the library when returning to the app, at most every AUTO_RESCAN_SECONDS."""
+        if not self.settings.auto_rescan:
+            return  # turned off in Settings: only Rescan checks the library
         # While the library is unavailable, every return checks whether its drive is back. The check
         # runs on the scan's thread, since a disconnected network share can take a while to answer.
         if self.library_unavailable or time.monotonic() - self.last_scan_finished >= AUTO_RESCAN_SECONDS:

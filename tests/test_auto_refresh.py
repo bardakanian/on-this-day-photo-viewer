@@ -103,6 +103,54 @@ class AutoRefreshTests(WindowTestCase):
         self.assertIn("not connected", self.window.status.text())
 
 
+class AutoRescanOffTests(WindowTestCase):
+    """With "Check the library for changes when I return to the app" off, only Rescan scans."""
+
+    def test_returning_does_not_scan(self):
+        APP.processEvents()
+        self.window.settings.auto_rescan = False
+        self.window.last_scan_finished -= AUTO_RESCAN_SECONDS
+        self.window.rescan_if_stale()
+        self.window.library_unavailable = True  # not even to look for a reconnected drive
+        self.window.rescan_if_stale()
+        self.assertIsNone(self.window.index_thread)
+        self.window.start_indexing()  # Rescan still works
+        self.assertIsNotNone(self.window.index_thread)
+
+    def test_setting_is_saved_from_the_dialog(self):
+        from onthisday.ui.dialogs import PreferencesDialog
+
+        def untick_and_save(dialog):
+            self.assertTrue(dialog.auto_rescan.isChecked())
+            dialog.auto_rescan.setChecked(False)
+            return 1
+
+        with patch.object(PreferencesDialog, "exec", untick_and_save), \
+                patch.object(self.window.settings_store, "save") as save:
+            self.window.show_preferences()
+        self.assertFalse(self.window.settings.auto_rescan)
+        self.assertFalse(save.call_args.args[0].auto_rescan)
+        if self.window.cache_job:
+            self.window.cache_job.join(10)
+
+
+class SettingsButtonTests(WindowTestCase):
+    def test_gear_opens_settings_and_follows_the_theme(self):
+        from onthisday.ui.dialogs import PreferencesDialog
+
+        button = self.window.settings_button
+        self.assertEqual(button.accessibleName(), "Settings")
+        self.assertFalse(button.icon().isNull())
+        with patch.object(PreferencesDialog, "exec", return_value=0) as shown:
+            button.click()
+        shown.assert_called_once()
+        if self.window.cache_job:
+            self.window.cache_job.join(10)
+        before = button.icon().cacheKey()
+        self.window._theme_changed("dark")
+        self.assertNotEqual(button.icon().cacheKey(), before)
+
+
 class UnpluggedAtLaunchTests(WindowTestCase):
     """The library's drive is not connected when the app starts."""
 
@@ -149,6 +197,16 @@ class SettingsTests(unittest.TestCase):
             config.write_text('{"photo_folder": "/Volumes/Unplugged Drive/Photos"}')
             with patch.object(settings, "CONFIG_FILE", config):
                 self.assertEqual(SettingsStore().load().photo_folder, Path("/Volumes/Unplugged Drive/Photos"))
+
+    def test_auto_rescan_defaults_on_and_round_trips(self):
+        with tempfile.TemporaryDirectory() as temp:
+            app_dir = Path(temp)
+            with patch.object(settings, "APP_DIR", app_dir), \
+                    patch.object(settings, "CONFIG_FILE", app_dir / "config.json"), \
+                    patch.object(settings, "THUMBNAIL_DIR", app_dir / "thumbnails"):
+                self.assertTrue(SettingsStore().load().auto_rescan)  # no config yet
+                SettingsStore().save(AppSettings(auto_rescan=False))
+                self.assertFalse(SettingsStore().load().auto_rescan)
 
 
 if __name__ == "__main__":

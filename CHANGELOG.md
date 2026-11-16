@@ -2,6 +2,14 @@
 
 With every change, bump `VERSION` in `onthisday/core/constants.py` and add an entry here.
 
+## 1.16.0 — 2026-11-15
+
+- A gear button at the right end of the toolbar opens **Settings**. Before, Settings was only in the menu bar (⌘,). The gear follows the light or dark theme.
+
+## 1.15.0 — 2026-11-15
+
+- New setting, **Settings > Check the library for changes when I return to the app** (on by default). Turn it off and the app never scans the drive on its own: not when you come back to it after 10 minutes, and not to look for a disconnected drive. The library is then only checked when you choose **Rescan**.
+
 ## 1.14.0 — 2026-11-15
 
 - Settings shows how much space the saved previews take ("Saved previews: 4.2 GB (119,530 files)"), counted in the background so the dialog opens at once.
