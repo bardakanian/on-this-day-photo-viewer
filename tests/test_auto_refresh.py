@@ -134,6 +134,23 @@ class AutoRescanOffTests(WindowTestCase):
             self.window.cache_job.join(10)
 
 
+class SettingsButtonTests(WindowTestCase):
+    def test_gear_opens_settings_and_follows_the_theme(self):
+        from onthisday.ui.dialogs import PreferencesDialog
+
+        button = self.window.settings_button
+        self.assertEqual(button.accessibleName(), "Settings")
+        self.assertFalse(button.icon().isNull())
+        with patch.object(PreferencesDialog, "exec", return_value=0) as shown:
+            button.click()
+        shown.assert_called_once()
+        if self.window.cache_job:
+            self.window.cache_job.join(10)
+        before = button.icon().cacheKey()
+        self.window._theme_changed("dark")
+        self.assertNotEqual(button.icon().cacheKey(), before)
+
+
 class UnpluggedAtLaunchTests(WindowTestCase):
     """The library's drive is not connected when the app starts."""
 

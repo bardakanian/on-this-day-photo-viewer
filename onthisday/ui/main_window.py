@@ -26,6 +26,7 @@ from .dialogs import PreferencesDialog
 from .notifications import notify
 from .pages import GalleryPage, LibraryInsightsPage, VideosPage, ViewerPage
 from .theme import ThemeManager
+from .widgets.icons import gear_icon
 
 LOGGER = logging.getLogger(__name__)
 
@@ -223,6 +224,14 @@ class MainWindow(QMainWindow):
         date_layout.addSpacing(6)
         date_layout.addWidget(self.filter_box)
         toolbar_layout.addWidget(self.date_navigation)
+        self.settings_button = QPushButton()
+        self.settings_button.setAccessibleName("Settings")
+        self.settings_button.setToolTip("Settings")
+        self.settings_button.setProperty("compact", True)
+        self.settings_button.setIcon(gear_icon(self.theme.colors.text))
+        self.settings_button.clicked.connect(self.show_preferences)
+        toolbar_layout.addSpacing(6)
+        toolbar_layout.addWidget(self.settings_button)
         root_layout.addWidget(toolbar)
 
         self.progress = QProgressBar()
@@ -463,6 +472,7 @@ class MainWindow(QMainWindow):
     def _theme_changed(self, _preference: str) -> None:
         self.insights.set_theme_colors(self.theme.colors)
         self.gallery.set_theme_colors(self.theme.colors)
+        self.settings_button.setIcon(gear_icon(self.theme.colors.text))
 
     def _page_changed(self, index: int) -> None:
         page = self.stack.widget(index)

@@ -204,6 +204,7 @@ open it the first time with right-click > **Open** (or System Settings > Privacy
 ### Browse the daily gallery
 
 - Use **Choose Folder** to select or change the active media library.
+- The gear at the right end of the toolbar opens **Settings**.
 - The library refreshes itself when you return to the app after 10 minutes; use **Rescan**
   to check right away after adding, moving, editing, or removing files. To stop these
   automatic checks, turn off **Settings > Check the library for changes when I return to
@@ -383,7 +384,7 @@ The shortcuts below are shown for macOS. On Windows, use `Ctrl` in place of `⌘
 | Open Video Library | `⌘⇧V` |
 | Open Library Insights | `⌘⇧I` |
 | Search videos | `⌘F` |
-| Open settings | `⌘,` |
+| Open settings | `⌘,` (or the gear at the right of the toolbar) |
 | Close window | `⌘W` |
 
 In the viewer:
