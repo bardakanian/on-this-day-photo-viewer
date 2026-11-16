@@ -213,7 +213,8 @@ open it the first time with right-click > **Open** (or System Settings > Privacy
   current date.
 - Use the media filter to show all items, photos only, or videos only.
 - Select a thumbnail to open it in the viewer (see below).
-- Collapse or expand a year by selecting its heading.
+- Collapse or expand a year by selecting its heading. While you scroll through a year, its
+  heading stays at the top of the gallery, so you can collapse it from there without scrolling back up.
 - **Live Photos:** an iPhone Live Photo exported as two files, such as `IMG_4330.HEIC` and
   `IMG_4330.MOV`, shows once, as a photo with a Live Photo badge (a dotted ring) and the
   label **LIVE PHOTO**, rather than as a photo plus a separate 1–3 second video. The files
