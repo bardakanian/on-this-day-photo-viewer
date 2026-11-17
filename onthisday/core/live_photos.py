@@ -53,6 +53,12 @@ def _parse(stamp: str | None) -> datetime | None:
         return None
 
 
+def live_pair_links(connection: sqlite3.Connection, folder_root: str) -> frozenset[tuple[str, str]]:
+    """Every (file, its partner) link stored for one folder; comparing two of these shows whether pairing changed."""
+    return frozenset(connection.execute(
+        "SELECT file_path, live_pair FROM photos WHERE folder_root = ? AND live_pair IS NOT NULL", (folder_root,)))
+
+
 def repair_live_photos(connection: sqlite3.Connection, folder_root: str) -> int:
     """Re-pair every Live Photo in one folder's index (one query and a dictionary pass).
 

@@ -190,6 +190,33 @@ class StallLoggingTests(WindowTestCase):
         self.assertIs(self.window.stall_watch, first)
 
 
+class RefreshAfterScanTests(WindowTestCase):
+    """After a scan the gallery is rebuilt only when something it shows may have changed."""
+
+    def finish_scan(self, **overrides) -> int:
+        """Send a finished scan to the window; returns how many times the gallery was refreshed."""
+        window = self.window
+        scan = {"scan_id": window.active_scan_id, "scanned": 3, "updated": 0, "unchanged": 3, "deleted": 0,
+                "errors": 0, "total_indexed": 3, "total_videos": 0, "live_photos": 1}
+        window._handle_index_event({"type": "scan_started", **scan})
+        with patch.object(window, "refresh_gallery") as refresh, patch.object(window, "start_saving_previews"):
+            window._handle_index_event({"type": "scan_complete", **scan, **overrides})
+        return refresh.call_count
+
+    def test_nothing_changed_leaves_the_gallery_alone(self):
+        self.assertEqual(self.finish_scan(pairs_changed=False), 0)
+
+    def test_a_changed_file_refreshes_the_gallery(self):
+        self.assertEqual(self.finish_scan(updated=2, pairs_changed=False), 1)
+
+    def test_a_removed_file_refreshes_the_gallery(self):
+        self.assertEqual(self.finish_scan(deleted=1, pairs_changed=False), 1)
+
+    def test_only_the_live_photo_grouping_changing_refreshes_the_gallery(self):
+        # Before the fix this was skipped, so a Live Photo and its clip could show apart until a restart.
+        self.assertEqual(self.finish_scan(pairs_changed=True), 1)
+
+
 class SettingsTests(unittest.TestCase):
     def test_missing_folder_is_remembered(self):
         with tempfile.TemporaryDirectory() as temp:
