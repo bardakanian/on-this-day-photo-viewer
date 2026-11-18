@@ -2,6 +2,10 @@
 
 With every change, bump `VERSION` in `onthisday/core/constants.py` and add an entry here.
 
+## 1.17.1 — 2026-11-17
+
+- After a scan, the gallery and the Video Library now refresh when only the grouping of Live Photos changed. Before, they refreshed only if a file was added, changed or removed, so a window could keep showing a Live Photo and its clip separately until you changed the day or restarted the app.
+
 ## 1.17.0 — 2026-11-15
 
 - While you scroll through a year in the gallery, its heading (the year and its item count) stays pinned at the top. Click it to collapse that year without scrolling back up; the gallery then jumps to the collapsed year, so you don't lose your place. The next year's heading pushes it up as it arrives.

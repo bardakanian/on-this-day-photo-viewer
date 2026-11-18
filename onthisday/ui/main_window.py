@@ -419,8 +419,9 @@ class MainWindow(QMainWindow):
                                        f"{event['total_indexed']:,} items checked in {took}  ·  "
                                        f"{event['updated']:,} new or changed, {event['deleted']:,} removed")
                 self.start_saving_previews()
-                if event["updated"] or event["deleted"] or self.library_unavailable:
-                    # Rebuilding unchanged pages would only flicker and reload thumbnails.
+                if event["updated"] or event["deleted"] or event.get("pairs_changed") or self.library_unavailable:
+                    # Rebuilding unchanged pages would only flicker and reload thumbnails. A change in
+                    # which files are grouped as Live Photos does change what's shown.
                     self.refresh_gallery()
                     if self.stack.currentWidget() is self.videos:
                         self._load_videos()

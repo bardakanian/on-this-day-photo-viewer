@@ -7,7 +7,7 @@ from typing import Callable, Iterator
 
 from .constants import BATCH_COMMIT_SIZE, SUPPORTED_EXTENSIONS, VIDEO_METADATA_VERSION
 from .database import VISIBLE, open_database
-from .live_photos import repair_live_photos
+from .live_photos import live_pair_links, repair_live_photos
 from .media import HEIC_ENABLED, get_capture_date, media_type_for_path, prune_thumbnail_cache
 
 METADATA_WORKERS = min(8, os.cpu_count() or 4)
@@ -150,7 +150,11 @@ class MediaIndexer:
                     return
                 connection.execute("DELETE FROM photos WHERE folder_root=? AND file_path=?", (self.folder_root, file_path))
                 deleted += 1
+            # Pairing can change what the gallery shows (a clip joins or leaves its photo) even when no
+            # file was added, changed or removed, so the scan reports whether it did.
+            links_before = live_pair_links(connection, self.folder_root)
             live_photos = repair_live_photos(connection, self.folder_root)
+            pairs_changed = live_pair_links(connection, self.folder_root) != links_before
             connection.commit()
             total = connection.execute(f"SELECT COUNT(*) FROM photos WHERE folder_root=? AND {VISIBLE}",
                                        (self.folder_root,)).fetchone()[0]
@@ -168,7 +172,7 @@ class MediaIndexer:
                 pass
             self.send("scan_complete", scanned=scanned, updated=updated, unchanged=unchanged,
                       deleted=deleted, errors=errors, total_indexed=total, total_videos=videos,
-                      live_photos=live_photos)
+                      live_photos=live_photos, pairs_changed=pairs_changed)
         except Exception as exc:
             self.send("scan_error", message=str(exc))
         finally:

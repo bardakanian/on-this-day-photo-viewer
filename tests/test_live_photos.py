@@ -182,6 +182,32 @@ class IndexTests(unittest.TestCase):
         records = self.repository.matches_for_date(self.library, date(2025, 5, 14), "All")
         self.assertTrue(records[0].is_live)
 
+    def test_scan_reports_when_only_the_pairing_changed(self):
+        dates = {
+            "IMG_4330.HEIC": datetime(2023, 5, 14, 10, 0, 0),
+            "IMG_4330.MOV": datetime(2023, 5, 14, 10, 0, 1),
+            "Birthday.mov": datetime(2022, 5, 14, 18, 0, 0),
+        }
+
+        def scan(scan_id: int) -> dict:
+            events = []
+            with patch.object(indexer, "HEIC_ENABLED", True), \
+                    patch.object(indexer, "get_capture_date", side_effect=lambda path, _type: dates[path.name]):
+                MediaIndexer(self.library, threading.Event(), scan_id, events.append).run()
+            return events[-1]
+
+        self.assertTrue(scan(1)["pairs_changed"], "the first scan links the photo and its clip")
+        again = scan(2)
+        self.assertEqual((again["updated"], again["pairs_changed"]), (0, False), "nothing changed")
+        # The files are untouched, but the index groups them differently (as after an older version).
+        connection = database.open_database()
+        connection.execute("UPDATE photos SET live_pair = NULL")
+        connection.commit()
+        connection.close()
+        repaired = scan(3)
+        self.assertEqual((repaired["updated"], repaired["deleted"], repaired["pairs_changed"]), (0, 0, True))
+        self.assertEqual(repaired["live_photos"], 1)
+
 
 class ViewerTests(unittest.TestCase):
     def setUp(self):
