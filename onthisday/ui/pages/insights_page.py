@@ -218,7 +218,9 @@ class LibraryInsightsPage(QWidget):
         self.chart = MediaByYearChart(self._colors)
         chart_scroll = QScrollArea()
         chart_scroll.setWidget(self.chart)
-        chart_scroll.setWidgetResizable(False)
+        # Resizable so the chart fills the card; its minimum width keeps bars readable, and a
+        # library with many years scrolls sideways instead of squeezing them.
+        chart_scroll.setWidgetResizable(True)
         chart_scroll.setFrameShape(QFrame.Shape.NoFrame)
         chart_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         chart_scroll.setMinimumHeight(286)

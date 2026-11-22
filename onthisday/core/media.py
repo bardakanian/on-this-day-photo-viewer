@@ -6,11 +6,11 @@ import threading
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Callable, Iterable
+from typing import Iterable
 
 from PIL import Image, ImageOps
 
-from .constants import LEGACY_THUMBNAIL_SIZE, THUMBNAIL_DIR, THUMBNAIL_SIZE, VIDEO_EXTENSIONS
+from .constants import HIGH_THUMBNAIL_EDGE, THUMBNAIL_DIR, THUMBNAIL_EDGE, THUMBNAIL_EDGES, VIDEO_EXTENSIONS
 from .database import ensure_app_dirs
 
 try:
@@ -242,15 +242,14 @@ def get_capture_date(path: Path, media_type: str) -> datetime | None:
     return capture_date_with_source(path, media_type)[0]
 
 
-def thumbnail_cache_path(
-    path: Path, file_size: int, modified_ns: int, size: tuple[int, int] = THUMBNAIL_SIZE,
-) -> Path:
-    signature = f"{path}|{file_size}|{modified_ns}|{size[0]}x{size[1]}"
+def thumbnail_cache_path(path: Path, file_size: int, modified_ns: int, edge: int = THUMBNAIL_EDGE) -> Path:
+    signature = f"{path}|{file_size}|{modified_ns}|edge{edge}"
     return THUMBNAIL_DIR / f"{hashlib.sha256(signature.encode()).hexdigest()}.jpg"
 
 
-def legacy_thumbnail_cache_path(path: Path, file_size: int, modified_ns: int) -> Path:
-    return thumbnail_cache_path(path, file_size, modified_ns, LEGACY_THUMBNAIL_SIZE)
+def other_thumbnail_edge(edge: int) -> int:
+    """The other quality's edge, whose preview stands in while this one is being made."""
+    return THUMBNAIL_EDGE if edge == HIGH_THUMBNAIL_EDGE else HIGH_THUMBNAIL_EDGE
 
 
 def _failure_marker(target: Path) -> Path:
@@ -268,9 +267,12 @@ def _partial_path(target: Path) -> Path:
 
 
 def thumbnail_cache_files(path: Path, file_size: int, modified_ns: int) -> list[Path]:
-    """Every cache file that may exist for one media item."""
-    target = thumbnail_cache_path(path, file_size, modified_ns)
-    return [target, _failure_marker(target), legacy_thumbnail_cache_path(path, file_size, modified_ns)]
+    """Every cache file that may exist for one media item, at either preview quality."""
+    files = []
+    for edge in THUMBNAIL_EDGES:
+        target = thumbnail_cache_path(path, file_size, modified_ns, edge)
+        files += [target, _failure_marker(target)]
+    return files
 
 
 def prune_thumbnail_cache(items: Iterable[tuple[str, int, int]]) -> int:
@@ -304,7 +306,7 @@ def _modified_before(path: Path, moment: float) -> bool:
         return False
 
 
-def _image_thumbnail(source: Path, target: Path) -> None:
+def _image_thumbnail(source: Path, target: Path, edge: int = THUMBNAIL_EDGE) -> None:
     with Image.open(source) as image:
         if getattr(image, "is_animated", False):
             try:
@@ -313,22 +315,20 @@ def _image_thumbnail(source: Path, target: Path) -> None:
                 pass
         # Let JPEGs decode at a reduced scale. This must happen before exif_transpose
         # loads the full image; a square request covers both rotated orientations.
-        longest = max(THUMBNAIL_SIZE)
-        image.draft("RGB", (longest, longest))
+        image.draft("RGB", (edge, edge))
         image = ImageOps.exif_transpose(image)
         image = image.convert("RGB")
-        image.thumbnail(THUMBNAIL_SIZE, Image.Resampling.LANCZOS)
-        canvas = Image.new("RGB", THUMBNAIL_SIZE, THUMBNAIL_PADDING)
-        canvas.paste(image, ((THUMBNAIL_SIZE[0] - image.width) // 2, (THUMBNAIL_SIZE[1] - image.height) // 2))
+        # The aspect ratio is kept and nothing is padded, so the gallery crops its own square tiles.
+        image.thumbnail((edge, edge), Image.Resampling.LANCZOS)
         partial = _partial_path(target)
         try:
-            canvas.save(partial, "JPEG", quality=87, optimize=True)
+            image.save(partial, "JPEG", quality=88, optimize=True)
             os.replace(partial, target)
         finally:
             partial.unlink(missing_ok=True)
 
 
-def _video_thumbnail(source: Path, target: Path) -> bool:
+def _video_thumbnail(source: Path, target: Path, edge: int = THUMBNAIL_EDGE) -> bool:
     # Prefer a frame one second in (skips black fade-ins); clips shorter than that
     # produce nothing, so fall back to the very first frame.
     partial = _partial_path(target)
@@ -338,8 +338,7 @@ def _video_thumbnail(source: Path, target: Path) -> bool:
                 subprocess.run([
                     imageio_ffmpeg.get_ffmpeg_exe(), "-y", *seek, "-i", str(source),
                     "-frames:v", "1", "-vf",
-                    f"scale={THUMBNAIL_SIZE[0]}:{THUMBNAIL_SIZE[1]}:force_original_aspect_ratio=decrease,"
-                    f"pad={THUMBNAIL_SIZE[0]}:{THUMBNAIL_SIZE[1]}:(ow-iw)/2:(oh-ih)/2",
+                    f"scale={edge}:{edge}:force_original_aspect_ratio=decrease",
                     # The ".part" name has no image extension, so name the format and codec.
                     "-q:v", "3", "-f", "image2", "-c:v", "mjpeg", str(partial),
                 ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30, check=False,
@@ -354,9 +353,10 @@ def _video_thumbnail(source: Path, target: Path) -> bool:
         partial.unlink(missing_ok=True)
 
 
-def get_cached_thumbnail(path: Path, media_type: str, file_size: int, modified_ns: int) -> Path | None:
+def get_cached_thumbnail(path: Path, media_type: str, file_size: int, modified_ns: int,
+                         edge: int = THUMBNAIL_EDGE) -> Path | None:
     ensure_app_dirs()
-    target = thumbnail_cache_path(path, file_size, modified_ns)
+    target = thumbnail_cache_path(path, file_size, modified_ns, edge)
     if target.exists():
         return target
     failed = _failure_marker(target)
@@ -366,10 +366,10 @@ def get_cached_thumbnail(path: Path, media_type: str, file_size: int, modified_n
         return None
     try:
         if media_type == "video":
-            if not _video_thumbnail(path, target):
+            if not _video_thumbnail(path, target, edge):
                 raise OSError("ffmpeg produced no frame")
         else:
-            _image_thumbnail(path, target)
+            _image_thumbnail(path, target, edge)
         return target
     except (OSError, ValueError):
         try:
@@ -426,46 +426,6 @@ def load_display_image(path: Path, max_edge: int) -> Image.Image:
         if max(image.size) > max_edge:
             image.thumbnail((max_edge, max_edge), Image.Resampling.LANCZOS)
         return image
-
-
-THUMBNAIL_PADDING = (18, 20, 24)  # canvas colour of photo thumbnails (video ones are padded black)
-
-
-def letterbox_content_rect(
-    width: int, height: int, pixel: Callable[[int, int], tuple[int, int, int]], tolerance: int = 12,
-) -> tuple[int, int, int, int] | None:
-    """Find the picture inside a padded thumbnail as (x, y, width, height).
-
-    Thumbnails are letterboxed with THUMBNAIL_PADDING, so the picture touches two opposite
-    edges and is centred. Only the middle row and column are sampled. Returns None when the
-    result isn't believable (e.g. a dark photo whose own edges look like padding).
-    """
-    def is_padding(x: int, y: int) -> bool:
-        return all(abs(a - b) <= tolerance for a, b in zip(pixel(x, y), THUMBNAIL_PADDING))
-
-    def span(length: int, sample: Callable[[int], bool]) -> tuple[int, int]:
-        start = 0
-        while start < length and sample(start):
-            start += 1
-        end = length
-        while end > start and sample(end - 1):
-            end -= 1
-        return start, end
-
-    left, right = span(width, lambda x: is_padding(x, height // 2))
-    top, bottom = span(height, lambda y: is_padding(width // 2, y))
-    content_w, content_h = right - left, bottom - top
-    if content_w <= 0 or content_h <= 0:
-        return None
-    # Padding is on one axis only and equal on both sides (allow a couple of pixels for JPEG noise).
-    padded_x, padded_y = width - content_w > 2, height - content_h > 2
-    if padded_x and padded_y:
-        return None
-    if abs(left - (width - right)) > 3 or abs(top - (height - bottom)) > 3:
-        return None
-    if content_w < width * 0.25 or content_h < height * 0.25:
-        return None
-    return left, top, content_w, content_h
 
 
 def format_duration(milliseconds: int) -> str:

@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Callable, Iterable, Sequence
 
 from . import media
+from .constants import THUMBNAIL_EDGE
 from .models import PreviewItem
 
 # Leave cores free for the gallery's own thumbnail loading and the UI.
@@ -50,7 +51,7 @@ def in_preview_order(items: Iterable[PreviewItem], today: date) -> list[PreviewI
     return sorted(items, key=lambda item: days_until(item.month, item.day, today))
 
 
-def missing_previews(items: Sequence[PreviewItem]) -> list[PreviewItem]:
+def missing_previews(items: Sequence[PreviewItem], edge: int = THUMBNAIL_EDGE) -> list[PreviewItem]:
     """Items with neither a saved preview nor a remembered failure. Lists the cache folder once,
     which is far faster than checking tens of thousands of files one by one."""
     try:
@@ -60,7 +61,7 @@ def missing_previews(items: Sequence[PreviewItem]) -> list[PreviewItem]:
         names = set()
     missing = []
     for item in items:
-        target = media.thumbnail_cache_path(item.path, item.file_size, item.modified_ns)
+        target = media.thumbnail_cache_path(item.path, item.file_size, item.modified_ns, edge)
         if target.name not in names and target.with_suffix(".failed").name not in names:
             missing.append(item)
     return missing
@@ -68,13 +69,13 @@ def missing_previews(items: Sequence[PreviewItem]) -> list[PreviewItem]:
 
 def warm_thumbnails(items: Sequence[PreviewItem], folder: Path, stop_event: threading.Event,
                     on_progress: Callable[[int, int], None] | None = None,
-                    workers: int = DEFAULT_WORKERS) -> WarmResult:
+                    workers: int = DEFAULT_WORKERS, edge: int = THUMBNAIL_EDGE) -> WarmResult:
     """Save previews for `items` (in order) that don't have one yet.
 
     `on_progress(done, missing)` is called from this thread every so often and at the end.
     Stops early if `stop_event` is set or `folder` stops being available (a drive unplugged).
     """
-    todo = missing_previews(items)
+    todo = missing_previews(items, edge)
     created = failed = done = 0
     last_report = 0.0
     stopped = False
@@ -98,7 +99,7 @@ def warm_thumbnails(items: Sequence[PreviewItem], folder: Path, stop_event: thre
                 stopped = True
                 break
             in_flight.add(executor.submit(
-                media.get_cached_thumbnail, item.path, item.media_type, item.file_size, item.modified_ns))
+                media.get_cached_thumbnail, item.path, item.media_type, item.file_size, item.modified_ns, edge))
             if len(in_flight) >= workers * 2:  # keep the queue short, so a stop takes effect quickly
                 finished, in_flight = wait(in_flight, return_when=FIRST_COMPLETED)
                 for future in finished:

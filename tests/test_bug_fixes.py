@@ -89,7 +89,7 @@ class AtomicThumbnailTests(IsolatedAppData):
             self.assertEqual(media.get_cached_thumbnail(source, "image", 1, 1), target)
         self.assertEqual(seen_while_writing, [False], "a half-written thumbnail would be served forever")
         with Image.open(target) as result:
-            self.assertEqual(result.size, media.THUMBNAIL_SIZE)
+            self.assertEqual(result.size, (400, 300))  # smaller than the edge, so kept as it is
         self.assertEqual(list(self.thumb_dir.glob("*.part")), [])
 
     def test_prune_removes_only_old_partial_files(self):

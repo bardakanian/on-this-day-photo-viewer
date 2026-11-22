@@ -15,6 +15,7 @@ class GalleryPage(QWidget):
     choose_folder_requested = Signal()
     open_requested = Signal(object)
     delete_requested = Signal(object)
+    tile_size_changed = Signal(int)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -30,6 +31,7 @@ class GalleryPage(QWidget):
         self.grid = GalleryGrid()
         self.grid.open_requested.connect(self.open_requested)
         self.grid.delete_requested.connect(self.delete_requested)
+        self.grid.tile_size_changed.connect(self.tile_size_changed)
         self.results.addWidget(self.grid)
         self.empty = EmptyState("", "")
         self.empty.action_requested.connect(self.choose_folder_requested)
@@ -49,6 +51,12 @@ class GalleryPage(QWidget):
 
     def set_time_format(self, time_format: str) -> None:
         self.grid.set_time_format(time_format)
+
+    def set_preview_quality(self, edge: int) -> None:
+        self.grid.set_preview_quality(edge)
+
+    def set_tile_size(self, size: int) -> None:
+        self.grid.set_tile_size(size)
 
     def cancel_pending(self) -> None:
         """Drop queued thumbnail work; running jobs just finish."""

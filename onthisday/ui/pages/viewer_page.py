@@ -3,6 +3,7 @@ from PySide6.QtGui import QKeySequence, QPixmap, QShortcut
 from PySide6.QtMultimedia import QMediaPlayer
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QStackedWidget, QVBoxLayout, QWidget
 
+from ...core.constants import THUMBNAIL_EDGE
 from ...core.media import read_only_trash_reason
 from ...core.metadata import MediaMetadata, metadata_rows
 from ...core.timeformat import DEFAULT_TIME_FORMAT, format_capture
@@ -43,6 +44,7 @@ class ViewerPage(QWidget):
         self._original_failed = False
         self._placeholder_done = False
         self.offline = False  # the library's drive is disconnected: saved previews only
+        self.preview_edge = THUMBNAIL_EDGE  # Settings > Preview quality, set by the main window
         self.read_only = False  # the library's drive can't be changed: nothing can be moved to the Trash
         self._live_playing = False  # a Live Photo's motion clip is playing over its still
 
@@ -285,7 +287,7 @@ class ViewerPage(QWidget):
         else:
             # The gallery thumbnail shows first; the sharp decode then replaces it in place.
             self.canvas.set_message("Loading…")
-            self.images.request_placeholder(item, keep_padding=self.offline)
+            self.images.request_placeholder(item, self.preview_edge)
             self.images.request(item, edge)
 
     def _prefetch_neighbours(self) -> None:

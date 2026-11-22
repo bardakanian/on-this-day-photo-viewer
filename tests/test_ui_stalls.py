@@ -105,41 +105,28 @@ class SearchBoxTests(unittest.TestCase):
         self.assertEqual(box._icon_color, QColor("#ff0000"))
 
 
-class GalleryFolderTextTests(unittest.TestCase):
+class GalleryPaintTests(unittest.TestCase):
+    """Drawing tiles must not touch the file system: on Windows that cost a third of a second a redraw."""
+
     def setUp(self):
         temp = tempfile.TemporaryDirectory()
         self.addCleanup(temp.cleanup)
         self.root = Path(temp.name).resolve()
         self.grid = GalleryGrid()
         self.addCleanup(self.grid.shutdown)
-        self.grid.set_sections([], self.root)
+        self.grid.resize(900, 700)
+        self.grid.set_sections([(2024, self.records(60))], self.root)
 
-    def record(self, *parts: str) -> MediaRecord:
-        return MediaRecord(self.root.joinpath(*parts), datetime(2020, 5, 1, 12), "image", 1, 1)
+    def records(self, count: int) -> list[MediaRecord]:
+        return [MediaRecord(self.root / f"{index}.jpg", datetime(2024, 5, 1, 12), "image", 1, index)
+                for index in range(count)]
 
-    def test_folder_text_is_relative_to_the_library(self):
-        self.assertEqual(self.grid._folder_text(self.record("photo.jpg")), "Library")
-        self.assertEqual(self.grid._folder_text(self.record("trips", "photo.jpg")), str(Path("trips")))
-
-    def test_a_file_outside_the_library_shows_its_own_folder(self):
-        outside = MediaRecord(Path(self.root.anchor) / "elsewhere" / "a.jpg", datetime(2020, 5, 1), "image", 1, 1)
-        self.assertEqual(self.grid._folder_text(outside), str(outside.path.parent))
-
-    def test_drawing_cards_does_not_ask_the_file_system_for_the_library_path(self):
-        records = [self.record(f"{n}.jpg") for n in range(50)]
-        with patch.object(Path, "resolve", side_effect=AssertionError("resolve() called while drawing")):
-            for record in records:
-                self.grid._folder_text(record)
-
-    def test_the_library_path_is_resolved_once_per_load(self):
-        with patch.object(Path, "resolve", autospec=True, side_effect=lambda self_: self_) as resolve:
-            self.grid.set_sections([], self.root)
-            self.assertEqual(resolve.call_count, 1)
-
-    def test_an_unreadable_library_path_does_not_break_drawing(self):
-        with patch.object(Path, "resolve", side_effect=OSError("drive gone")):
-            self.grid.set_sections([], self.root)
-        self.assertEqual(self.grid._folder_text(self.record("a.jpg")), str(self.root))
+    def test_drawing_does_not_ask_the_file_system(self):
+        with patch.object(self.grid.loader, "request"):  # loading files is the loader's job, off the UI thread
+            self.grid.viewport().repaint()  # paints, and asks for the previews it needs
+            for attribute in ("resolve", "exists", "stat"):
+                with patch.object(Path, attribute, side_effect=AssertionError(f"{attribute}() called while drawing")):
+                    self.grid.viewport().repaint()
 
 
 if __name__ == "__main__":

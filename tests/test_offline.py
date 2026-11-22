@@ -180,7 +180,8 @@ class UnpluggedBrowsingTests(IsolatedAppData):
         self.window.start_indexing()
         self.wait_until(lambda: len(self.window.gallery.records) == 1)
         record = self.window.gallery.records[0]
-        saved = media.thumbnail_cache_path(record.path, record.file_size, record.modified_ns)
+        saved = media.thumbnail_cache_path(record.path, record.file_size, record.modified_ns,
+                                           self.window.settings.preview_edge)
         self.wait_until(saved.exists)  # made by the background preview saver after the scan
         self.wait_until(lambda: not self.window.preview_thread.is_alive())
 
