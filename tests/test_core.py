@@ -124,10 +124,9 @@ class StorageTests(unittest.TestCase):
         Image.new("RGB", (4000, 3000), "red").save(source, exif=exif)
         thumbnail = media.get_cached_thumbnail(source, "image", 1, 1)
         with Image.open(thumbnail) as result:
-            self.assertEqual(result.size, media.THUMBNAIL_SIZE)
-            # Portrait after rotation: padded at the sides, image in the middle.
-            self.assertLess(sum(result.getpixel((5, result.height // 2))), 100)
-            self.assertGreater(result.getpixel((result.width // 2, result.height // 2))[0], 200)
+            # Portrait after rotation, kept whole: 3:4, no padding, longest side at the edge.
+            self.assertEqual(result.size, (media.THUMBNAIL_EDGE * 3 // 4, media.THUMBNAIL_EDGE))
+            self.assertGreater(result.getpixel((5, 5))[0], 200)  # the photo reaches the corner
 
     def test_failed_thumbnail_is_not_retried(self):
         source = self.root / "broken.jpg"
@@ -157,7 +156,7 @@ class StorageTests(unittest.TestCase):
         thumbnail = media.get_cached_thumbnail(source, "video", 1, 1)
         self.assertIsNotNone(thumbnail)
         with Image.open(thumbnail) as result:
-            self.assertEqual(result.size, media.THUMBNAIL_SIZE)
+            self.assertEqual(result.size, (media.THUMBNAIL_EDGE, media.THUMBNAIL_EDGE * 240 // 320))
 
     def test_indexer_reads_dates_in_parallel(self):
         media_root = self.root / "parallel"
@@ -273,6 +272,22 @@ class StorageTests(unittest.TestCase):
         self.assertTrue(current.exists())
         self.assertFalse(stale.exists())
         self.assertFalse(failed.exists())
+
+    def test_scan_keeps_both_preview_qualities_and_drops_older_formats(self):
+        library = self.root / "library"
+        library.mkdir()
+        photo = library / "photo.jpg"
+        Image.new("RGB", (64, 48), "orange").save(photo)
+        MediaIndexer(library, threading.Event(), 1, lambda event: None).run()
+        stat = photo.stat()
+        kept = [media.get_cached_thumbnail(photo.resolve(), "image", stat.st_size, stat.st_mtime_ns, edge)
+                for edge in media.THUMBNAIL_EDGES]
+        # What the letterboxed previews of earlier versions hashed to: no longer usable, so not kept.
+        old_format = self.thumb_dir / "aa11bb22.jpg"
+        old_format.write_bytes(b"a 496x372 padded preview")
+        MediaIndexer(library, threading.Event(), 2, lambda event: None).run()
+        self.assertEqual([path.exists() for path in kept], [True, True])
+        self.assertFalse(old_format.exists())
 
     def test_unchanged_files_from_an_older_version_are_reread_once(self):
         library = self.root / "library"

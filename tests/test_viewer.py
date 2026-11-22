@@ -85,17 +85,6 @@ class DisplayImageTests(unittest.TestCase):
         self.assertEqual(max(image.size), 1000)
         self.assertEqual(image.size, (1000, 400))
 
-    def test_letterbox_padding_is_found(self):
-        thumb = Image.new("RGB", (496, 372), media.THUMBNAIL_PADDING)
-        thumb.paste(Image.new("RGB", (279, 372), (200, 120, 60)), (108, 0))  # a portrait photo
-        rect = media.letterbox_content_rect(496, 372, lambda x, y: thumb.getpixel((x, y)))
-        self.assertEqual(rect, (108, 0, 279, 372))
-
-    def test_letterbox_rejects_dark_photo(self):
-        dark = Image.new("RGB", (496, 372), media.THUMBNAIL_PADDING)
-        dark.paste(Image.new("RGB", (40, 40), "white"), (228, 166))  # mostly "padding" on both axes
-        self.assertIsNone(media.letterbox_content_rect(496, 372, lambda x, y: dark.getpixel((x, y))))
-
 
 class ViewerItemTests(unittest.TestCase):
     def test_video_rows_without_dates_are_kept(self):

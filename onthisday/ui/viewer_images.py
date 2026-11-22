@@ -6,7 +6,8 @@ from pathlib import Path
 from PySide6.QtCore import QObject, QSize, Signal, Slot
 from PySide6.QtGui import QImage, QImageIOHandler, QImageReader
 
-from ..core.media import display_size, get_cached_thumbnail, letterbox_content_rect, load_display_image
+from ..core.media import display_size, get_cached_thumbnail, load_display_image
+from ..core.constants import THUMBNAIL_EDGE
 from ..core.models import ViewerItem
 from ..core.workqueue import WorkQueue
 
@@ -53,27 +54,13 @@ def decode_display_image(path: Path, max_edge: int | None) -> Decoded:
     return image, natural
 
 
-def load_placeholder(item: ViewerItem, keep_padding: bool = False) -> QImage | None:
-    """The gallery thumbnail with its letterbox padding cropped off, or None if that isn't reliable.
-
-    With `keep_padding`, a thumbnail whose padding can't be found reliably is returned whole:
-    better than nothing while the original can't be reached.
-    """
-    path = get_cached_thumbnail(item.path, "image", item.file_size, item.modified_ns)
+def load_placeholder(item: ViewerItem, edge: int = THUMBNAIL_EDGE) -> QImage | None:
+    """The item's saved preview, shown while the original is decoded (or instead of it, offline)."""
+    path = get_cached_thumbnail(item.path, "image", item.file_size, item.modified_ns, edge)
     if path is None:
         return None
     image = QImage(str(path))
-    if image.isNull():
-        return None
-
-    def pixel(x: int, y: int) -> tuple[int, int, int]:
-        colour = image.pixelColor(x, y)
-        return colour.red(), colour.green(), colour.blue()
-
-    rect = letterbox_content_rect(image.width(), image.height(), pixel)
-    if rect:
-        return image.copy(*rect)
-    return image if keep_padding else None
+    return None if image.isNull() else image
 
 
 class _Signals(QObject):
@@ -107,8 +94,8 @@ class ViewerImageLoader(QObject):
     def request(self, item: ViewerItem, max_edge: int | None) -> None:
         self._submit(self._key(item, max_edge), lambda: decode_display_image(item.path, max_edge))
 
-    def request_placeholder(self, item: ViewerItem, keep_padding: bool = False) -> None:
-        self._submit(self._key(item, PLACEHOLDER), lambda: (load_placeholder(item, keep_padding), None))
+    def request_placeholder(self, item: ViewerItem, edge: int = THUMBNAIL_EDGE) -> None:
+        self._submit(self._key(item, PLACEHOLDER), lambda: (load_placeholder(item, edge), None))
 
     def focus(self, keep: list[tuple[ViewerItem, object]]) -> None:
         """Drop queued work that isn't for the current photo or its neighbours, in the given order."""

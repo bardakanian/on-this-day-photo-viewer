@@ -188,9 +188,6 @@ class MainWindow(QMainWindow):
         self.rescan_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_BrowserReload))
         self.rescan_button.clicked.connect(self.start_indexing)
         toolbar_layout.addWidget(self.rescan_button)
-        self.videos_button = QPushButton("Video Library")
-        self.videos_button.clicked.connect(self.show_videos)
-        toolbar_layout.addWidget(self.videos_button)
         self.insights_button = QPushButton("Library Insights")
         self.insights_button.clicked.connect(self.show_insights)
         toolbar_layout.addWidget(self.insights_button)
@@ -246,6 +243,9 @@ class MainWindow(QMainWindow):
         self.gallery.open_requested.connect(self._open_from_gallery)
         self.gallery.delete_requested.connect(self.delete_media)
         self.gallery.set_theme_colors(self.theme.colors)
+        self.gallery.set_preview_quality(self.settings.preview_edge)
+        self.gallery.set_tile_size(self.settings.tile_size)
+        self.gallery.tile_size_changed.connect(self._tile_size_changed)
         self.videos = VideosPage()
         self.videos.back_requested.connect(lambda: self.stack.setCurrentWidget(self.gallery))
         self.videos.refresh_requested.connect(self._load_videos)
@@ -260,6 +260,7 @@ class MainWindow(QMainWindow):
         self.stack.addWidget(self.videos)
         self.stack.addWidget(self.insights)
         self.viewer = ViewerPage()
+        self.viewer.preview_edge = self.settings.preview_edge
         self.viewer.closed.connect(self._close_viewer)
         self.viewer.open_externally_requested.connect(lambda item: self.open_media(item.path))
         self.viewer.trash_requested.connect(self._trash_from_viewer)
@@ -306,6 +307,17 @@ class MainWindow(QMainWindow):
         insights = QAction("Library Insights", self, shortcut=QKeySequence("Ctrl+Shift+I"))
         insights.triggered.connect(self.show_insights)
         view_menu.addAction(insights)
+        view_menu.addSeparator()
+        larger = QAction("Larger Tiles", self, shortcut=QKeySequence("Ctrl+="))
+        larger.triggered.connect(self.gallery.grid.zoom_in)
+        view_menu.addAction(larger)
+        smaller = QAction("Smaller Tiles", self, shortcut=QKeySequence("Ctrl+-"))
+        smaller.triggered.connect(self.gallery.grid.zoom_out)
+        view_menu.addAction(smaller)
+        default_tiles = QAction("Default Tile Size", self, shortcut=QKeySequence("Ctrl+0"))
+        default_tiles.triggered.connect(self.gallery.grid.reset_zoom)
+        view_menu.addAction(default_tiles)
+        view_menu.addSeparator()
         search = QAction("Search Videos", self, shortcut=QKeySequence.StandardKey.Find)
         search.triggered.connect(self.focus_search)
         view_menu.addAction(search)
@@ -469,6 +481,15 @@ class MainWindow(QMainWindow):
         self.gallery.set_time_format(self.settings.time_format)
         self.videos.set_time_format(self.settings.time_format)
         self.viewer.set_time_format(self.settings.time_format)
+
+    def _tile_size_changed(self, size: int) -> None:
+        if size == self.settings.tile_size:
+            return
+        self.settings.tile_size = size
+        try:
+            self.settings_store.save(self.settings)
+        except OSError:
+            LOGGER.exception("Could not save the gallery tile size")
 
     def _theme_changed(self, _preference: str) -> None:
         self.insights.set_theme_colors(self.theme.colors)
@@ -647,12 +668,14 @@ class MainWindow(QMainWindow):
         stop = self.preview_stop = threading.Event()
         self.preview_eta = Eta()
         repository, emit = self.repository, self.preview_events.received.emit
+        edge = self.settings.preview_edge
 
         def run():
             try:
                 items = in_preview_order(repository.preview_items(folder), date.today())
                 result = warm_thumbnails(items, folder, stop,
-                                         lambda done, missing: emit({"stop": stop, "done": done, "missing": missing}))
+                                         lambda done, missing: emit({"stop": stop, "done": done, "missing": missing}),
+                                         edge=edge)
                 emit({"stop": stop, "result": result})
             except Exception:  # includes the window closing while a progress event was being sent
                 LOGGER.exception("Saving previews stopped")
@@ -728,8 +751,10 @@ class MainWindow(QMainWindow):
 
     def show_preferences(self) -> None:
         dialog = PreferencesDialog(self.settings.theme, self.settings.save_previews, self.settings.time_format, self,
-                                   auto_rescan=self.settings.auto_rescan)
+                                   auto_rescan=self.settings.auto_rescan,
+                                   preview_quality=self.settings.preview_quality)
         dialog.delete_previews_requested.connect(lambda: self._confirm_delete_previews(dialog))
+        dialog.open_videos_requested.connect(self.show_videos)
         self.preferences = dialog
         if self.deleting_previews():
             dialog.set_cache_usage(None, deleting=True)
@@ -746,6 +771,11 @@ class MainWindow(QMainWindow):
             self.settings.time_format = dialog.selected_time_format
             self._apply_time_format()
             self.settings.auto_rescan = dialog.selected_auto_rescan
+            if dialog.selected_preview_quality != self.settings.preview_quality:
+                self.settings.preview_quality = dialog.selected_preview_quality
+                self.gallery.set_preview_quality(self.settings.preview_edge)
+                self.viewer.preview_edge = self.settings.preview_edge
+                self.start_saving_previews()  # the previews already saved are the other size
             if dialog.selected_save_previews != self.settings.save_previews:
                 self.settings.save_previews = dialog.selected_save_previews
                 if self.settings.save_previews:

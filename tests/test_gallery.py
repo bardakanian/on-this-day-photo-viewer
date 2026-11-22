@@ -9,41 +9,57 @@ from datetime import date, datetime
 from pathlib import Path
 from unittest.mock import patch
 
-from PySide6.QtCore import QEvent, QPoint, QPointF, Qt
+from PySide6.QtCore import QEvent, QPointF, Qt
 from PySide6.QtGui import QMouseEvent
 from PySide6.QtWidgets import QApplication
 
+from onthisday.core.constants import HIGH_THUMBNAIL_EDGE, THUMBNAIL_EDGE
 from onthisday.core.gallery_layout import (
-    CARD_HEIGHT, CARD_WIDTH, HEADER_HEIGHT, SECTION_GAP, SPACING, columns_for, layout_sections,
+    DEFAULT_TILE, HEADER_HEIGHT, MARGIN, MAX_TILE, MIN_TILE, SECTION_GAP, SPACING, columns_for, layout_sections,
 )
 from onthisday.core.models import MediaRecord
 from onthisday.ui.pages.gallery_page import GalleryPage
-from onthisday.ui.widgets.gallery_grid import PREVIEW
 
 APP = QApplication.instance() or QApplication([])
+
+ONE_COLUMN = 2 * MARGIN + DEFAULT_TILE
 
 
 class LayoutTests(unittest.TestCase):
     def test_columns(self):
         self.assertEqual(columns_for(0), 1)
-        self.assertEqual(columns_for(CARD_WIDTH), 1)
-        self.assertEqual(columns_for(3 * CARD_WIDTH + 2 * SPACING), 3)
-        self.assertEqual(columns_for(3 * CARD_WIDTH + 2 * SPACING - 1), 2)
+        self.assertEqual(columns_for(ONE_COLUMN), 1)
+        self.assertEqual(columns_for(2 * MARGIN + 3 * DEFAULT_TILE + 2 * SPACING), 3)
+        self.assertEqual(columns_for(2 * MARGIN + 3 * DEFAULT_TILE + 2 * SPACING - 1), 2)
+        self.assertEqual(columns_for(1000, tile=MIN_TILE), 10)  # zoomed out: more, smaller tiles
+
+    def test_tiles_are_square_and_fill_each_row(self):
+        width = 1000
+        layout = layout_sections([7, 2], [False, False], width)
+        tiles = [cell for cell in layout.cells if not cell.is_header]
+        self.assertEqual(len(tiles), 9)
+        for tile in tiles:
+            # Edges are rounded, not sizes, so a tile can be a pixel off square; a row is uniform.
+            self.assertAlmostEqual(tile.width, tile.height, delta=1)
+        self.assertEqual(len({tile.height for tile in tiles}), 1)
+        row = [tile for tile in tiles if tile.y == tiles[0].y]
+        self.assertEqual(len(row), layout.columns)
+        self.assertEqual(row[0].x, MARGIN)
+        self.assertEqual(row[-1].x + row[-1].width, width - MARGIN)  # the row fills the width exactly
+        self.assertEqual({b.x - (a.x + a.width) for a, b in zip(row, row[1:])}, {SPACING})
 
     def test_sections_rows_and_collapse(self):
-        width = 3 * CARD_WIDTH + 2 * SPACING
-        layout = layout_sections([7, 2], [False, False], width)
+        layout = layout_sections([7, 2], [False, False], 1000)
         headers = [cell for cell in layout.cells if cell.is_header]
-        cards = [cell for cell in layout.cells if not cell.is_header]
+        tiles = [cell for cell in layout.cells if not cell.is_header]
         self.assertEqual(len(headers), 2)
-        self.assertEqual(len(cards), 9)
-        first_card = cards[0]
-        self.assertEqual((first_card.x, first_card.y), (0, HEADER_HEIGHT + SPACING // 2))
-        self.assertEqual(cards[3].y, first_card.y + CARD_HEIGHT + SPACING)  # 4th card starts row 2
-        rows_end = first_card.y + 3 * CARD_HEIGHT + 2 * SPACING
-        self.assertEqual(headers[1].y, rows_end + SECTION_GAP)
+        self.assertEqual(headers[0].y, 0)
+        self.assertEqual(tiles[0].y, HEADER_HEIGHT)
+        second_row = tiles[layout.columns]
+        self.assertEqual(second_row.y, tiles[0].y + tiles[0].height + SPACING)
+        self.assertEqual(headers[1].y, second_row.bottom + SECTION_GAP)
 
-        collapsed = layout_sections([7, 2], [True, False], width)
+        collapsed = layout_sections([7, 2], [True, False], 1000)
         self.assertEqual(sum(not cell.is_header for cell in collapsed.cells), 2)
         self.assertLess(collapsed.height, layout.height)
 
@@ -55,14 +71,14 @@ class LayoutTests(unittest.TestCase):
             self.assertEqual(layout.visible(top, bottom), expected, top)
 
     def test_cell_at(self):
-        layout = layout_sections([4], [False], 2 * CARD_WIDTH + SPACING)
-        card = layout.cell_at(CARD_WIDTH + SPACING + 5, HEADER_HEIGHT + SPACING // 2 + 5)
-        self.assertEqual((card.section, card.item), (0, 1))
-        self.assertIsNone(layout.cell_at(CARD_WIDTH + 2, HEADER_HEIGHT + SPACING // 2 + 5))  # the gap
+        layout = layout_sections([4], [False], 2 * MARGIN + 2 * DEFAULT_TILE + SPACING)
+        second = [cell for cell in layout.cells if not cell.is_header][1]
+        self.assertEqual(layout.cell_at(second.x + 5, second.y + 5).item, 1)
+        self.assertIsNone(layout.cell_at(second.x - 1, second.y + 5))  # the gap between tiles
 
 
-def records(year: int, count: int) -> list[MediaRecord]:
-    return [MediaRecord(Path(f"/library/{year}/{index:04}.jpg"), datetime(year, 5, 1, 12), "image", 1, index)
+def records(year: int, count: int, media_type: str = "image") -> list[MediaRecord]:
+    return [MediaRecord(Path(f"/library/{year}/{index:04}.jpg"), datetime(year, 5, 1, 12), media_type, 1, index)
             for index in range(count)]
 
 
@@ -70,7 +86,7 @@ class PinnedHeaderTests(unittest.TestCase):
     """The year scrolling past stays at the top of the screen."""
 
     def setUp(self):
-        self.layout = layout_sections([20, 20], [False, False], CARD_WIDTH)  # one column
+        self.layout = layout_sections([20, 20], [False, False], ONE_COLUMN)
         self.first, self.second = self.layout.headers
 
     def test_nothing_pinned_while_the_header_is_in_view(self):
@@ -96,7 +112,8 @@ class GridTests(unittest.TestCase):
         APP.processEvents()  # lay the page out at its size
         self.requested = []
         self.patch = patch.object(self.page.grid.loader, "request",
-                                  side_effect=lambda record, size, **_options: self.requested.append(record))
+                                  side_effect=lambda record, size, *args, **options:
+                                  self.requested.append((record, size)))
         self.patch.start()
         self.page.show_records(records(2024, 2000) + records(2019, 3), date(2026, 5, 1), "All", Path("/library"))
         self.grid = self.page.grid
@@ -111,6 +128,9 @@ class GridTests(unittest.TestCase):
         self.grid.viewport().repaint()
         APP.processEvents()
 
+    def tiles(self) -> list:
+        return [cell for cell in self.grid.layout_.cells if not cell.is_header]
+
     def click(self, x: float, y: float, button=Qt.MouseButton.LeftButton) -> None:
         position = QPointF(x, y)
         for kind in (QEvent.Type.MouseButtonPress, QEvent.Type.MouseButtonRelease):
@@ -118,30 +138,82 @@ class GridTests(unittest.TestCase):
                                 Qt.KeyboardModifier.NoModifier)
             QApplication.sendEvent(self.grid.viewport(), event)
 
-    def test_only_cards_near_the_screen_load_thumbnails(self):
+    def test_only_tiles_near_the_screen_load_previews(self):
         self.assertEqual(len(self.page.records), 2003)
         self.assertGreater(len(self.requested), 0)
-        self.assertLess(len(self.requested), 80, "thousands of cards would mean thumbnails for everything")
+        self.assertLess(len(self.requested), 150, "thousands of tiles would mean previews for everything")
         self.grid.verticalScrollBar().setValue(self.grid.verticalScrollBar().maximum() // 2)
         self.paint()
-        middle = [record.path.name for record in self.requested[-5:]]
-        self.assertTrue(all("2024" in str(record.path) for record in self.requested))
-        self.assertNotIn("0000.jpg", middle)
+        self.assertTrue(all("2024" in str(record.path) for record, _ in self.requested))
+        self.assertNotIn("0000.jpg", [record.path.name for record, _ in self.requested[-5:]])
 
-    def test_clicking_a_preview_opens_it(self):
+    def test_previews_are_asked_for_at_the_tile_size(self):
+        self.grid.clear_thumbnails()  # nothing loaded or in flight
+        self.requested.clear()
+        self.paint()
+        ratio = self.grid.devicePixelRatioF()
+        wanted = round(self.grid.layout_.tile * ratio)
+        self.assertEqual({size.width() for _, size in self.requested}, {wanted})
+        self.assertEqual({size.height() for _, size in self.requested}, {wanted})
+
+    def test_clicking_a_tile_opens_it(self):
         opened = []
         self.grid.open_requested.connect(opened.append)
-        first = next(cell for cell in self.grid.layout_.cells if not cell.is_header)
-        self.click(first.x + PREVIEW.center().x(), first.y + PREVIEW.center().y())
+        first = self.tiles()[0]
+        self.click(first.x + first.width / 2, first.y + first.height / 2)
         self.assertEqual(opened, [self.page.records[0]])
 
-    def test_trash_button_asks_to_delete(self):
+    def test_right_click_offers_open_and_trash(self):
         deleted = []
         self.grid.delete_requested.connect(deleted.append)
-        second = [cell for cell in self.grid.layout_.cells if not cell.is_header][1]
-        trash = self.grid._trash_rect(second).center()
-        self.click(trash.x(), trash.y())
+        menu = self.grid.context_menu(self.page.records[1])
+        trash = [action for action in menu.actions() if action.text() == "Move to Trash"]
+        self.assertEqual(len(trash), 1)
+        self.assertTrue(trash[0].isEnabled())
+        trash[0].trigger()
         self.assertEqual(deleted, [self.page.records[1]])
+
+    def test_read_only_drive_disables_trash(self):
+        self.page.show_records(records(2024, 10), date(2026, 5, 1), "All", Path("/library"), read_only=True)
+        menu = self.grid.context_menu(self.page.records[0])
+        trash = next(action for action in menu.actions() if action.text() == "Move to Trash")
+        self.assertFalse(trash.isEnabled())
+
+    def test_offline_offers_no_trash_at_all(self):
+        self.page.show_records(records(2024, 10), date(2026, 5, 1), "All", Path("/library"), offline=True)
+        menu = self.grid.context_menu(self.page.records[0])
+        self.assertEqual([action.text() for action in menu.actions() if action.text()], ["Open"])
+
+    def test_zooming_changes_the_tile_size_and_reports_it(self):
+        sizes = []
+        self.grid.tile_size_changed.connect(sizes.append)
+        before = self.grid.layout_.tile
+        self.grid.zoom_in()
+        self.paint()
+        self.assertGreater(self.grid.layout_.tile, before)
+        self.assertEqual(sizes[-1], self.grid.tile_size)
+        self.grid.set_tile_size(10_000)
+        self.assertEqual(self.grid.tile_size, MAX_TILE)
+        self.grid.set_tile_size(1)
+        self.assertEqual(self.grid.tile_size, MIN_TILE)
+        self.grid.reset_zoom()
+        self.assertEqual(self.grid.tile_size, DEFAULT_TILE)
+
+    def test_zooming_keeps_bigger_tiles_sharp(self):
+        self.requested.clear()
+        self.grid.zoom_in()
+        self.paint()
+        ratio = self.grid.devicePixelRatioF()
+        self.assertEqual({size.width() for _, size in self.requested}, {round(self.grid.layout_.tile * ratio)})
+
+    def test_changing_preview_quality_reloads_the_tiles(self):
+        self.grid.set_preview_quality(HIGH_THUMBNAIL_EDGE)
+        self.requested.clear()
+        self.paint()
+        self.assertGreater(len(self.requested), 0)
+        self.assertEqual(self.grid.preview_edge, HIGH_THUMBNAIL_EDGE)
+        self.grid.set_preview_quality(THUMBNAIL_EDGE)
+        self.assertEqual(self.grid.preview_edge, THUMBNAIL_EDGE)
 
     def test_header_collapses_and_refresh_keeps_collapse_and_scroll(self):
         header = self.grid.layout_.cells[0]
@@ -158,24 +230,12 @@ class GridTests(unittest.TestCase):
     def test_pinned_header_collapses_its_year_without_scrolling_up(self):
         self.grid.verticalScrollBar().setValue(5000)  # deep inside 2024
         self.paint()
-        self.click(20, HEADER_HEIGHT / 2)  # the top of the screen: 2024's pinned header, not a card
+        self.click(MARGIN + 20, HEADER_HEIGHT / 2)  # the top of the screen: 2024's pinned header, not a tile
         self.assertEqual(self.grid.collapsed, {2024})
         self.assertEqual(self.grid.verticalScrollBar().value(), 0)  # its header is back at the top
         self.paint()
-        self.click(20, HEADER_HEIGHT / 2)  # and it can be expanded again from there
+        self.click(MARGIN + 20, HEADER_HEIGHT / 2)  # and it can be expanded again from there
         self.assertEqual(self.grid.collapsed, set())
-
-    def test_read_only_drive_dims_trash_instead_of_asking(self):
-        deleted = []
-        self.grid.delete_requested.connect(deleted.append)
-        self.page.show_records(records(2024, 10), date(2026, 5, 1), "All", Path("/library"), read_only=True)
-        card = [cell for cell in self.grid.layout_.cells if not cell.is_header][0]
-        trash = self.grid._trash_rect(card).center()
-        self.click(trash.x(), trash.y())
-        self.assertEqual(deleted, [])
-        self.page.show_records(records(2024, 10), date(2026, 5, 1), "All", Path("/library"))
-        self.click(trash.x(), trash.y())
-        self.assertEqual(len(deleted), 1)  # a writable drive works as before
 
     def test_empty_day_shows_a_message(self):
         self.page.show_records([], date(2026, 5, 3), "Photos", Path("/library"))

@@ -18,10 +18,13 @@ generation, search, and library analytics all stay on your computer.
 - Filters the gallery to all media, photos only, or videos only.
 - Shows an iPhone Live Photo (a HEIC or JPG plus a MOV with the same name) once, with a
   Live Photo badge, and plays its motion in the viewer.
-- Generates Retina-ready thumbnails away from the main interface and reuses cached results.
+- Shows the day as a grid of square tiles, like Photos: the picture fills the tile, with no
+  filename or buttons in the way. Zoom in for fewer, larger tiles or out for more.
+- Generates Retina-ready previews away from the main interface and reuses cached results.
+  **Settings > Preview quality** chooses High (1024 px, sharp in large tiles) or Standard (512 px).
 - Keeps the interface responsive: date lookups, thumbnails, and photo decoding all happen
   in the background, and scans read capture dates in parallel.
-- Draws the gallery as a virtual grid: only cards on screen are drawn and load thumbnails,
+- Draws the gallery as a virtual grid: only tiles on screen are drawn and load previews,
   so a day with thousands of items scrolls as smoothly as a day with ten.
 - Opens straight to the saved index, and re-checks the library when you return to the app
   after 10 minutes.
@@ -34,13 +37,14 @@ generation, search, and library analytics all stay on your computer.
 - Supports system, light, and dark appearance modes.
 - Shows times on a 12-hour or 24-hour clock, chosen in Settings.
 - Moves an item to the operating system's Trash only after explicit confirmation.
-- Preserves the existing app settings, media index, and compatible thumbnail cache.
+- Preserves the existing app settings and media index.
 
 ## Screenshots
 
 The screenshots below were captured from a disposable demo library containing
 synthetic artwork, fictional filenames, and fictional dates. They contain no
-personal media, real library paths, or embedded metadata.
+personal media, real library paths, or embedded metadata. Regenerate them with
+`python tools/make_screenshots.py`, which runs the app headless against a fresh demo library.
 
 ### Date-based gallery
 
@@ -83,9 +87,9 @@ Search and sort indexed videos without leaving the desktop app.
    saved, the gallery works while the library's drive is disconnected: it shows every
    indexed item with its saved preview, and the viewer shows the preview, enlarged to fit,
    in place of the original. Opening in another app, moving to the Trash, and playing
-   videos wait until the drive is back. Previews take about 35 KB per item (roughly 3.5 GB
-   for 100,000 items); turn them off under **Settings > Save a preview of every photo and
-   video**, and only items you've scrolled past keep one. Turning them off offers to delete
+   videos wait until the drive is back. A High preview takes about 140 KB per item (roughly
+   14 GB for 100,000 items) and a Standard one about 40 KB; turn them off under
+   **Settings > Save a preview of every photo and video**, and only items you've scrolled past keep one. Turning them off offers to delete
    the ones already saved.
 
    **Settings** shows how much space the saved previews take. **Delete All Previews…** frees it,
@@ -212,7 +216,10 @@ open it the first time with right-click > **Open** (or System Settings > Privacy
 - Use the arrow controls to browse adjacent dates or **Today** to return to the
   current date.
 - Use the media filter to show all items, photos only, or videos only.
-- Select a thumbnail to open it in the viewer (see below).
+- Select a tile to open it in the viewer (see below). The picture fills the square tile,
+  so a tall or wide photo is cropped here; the viewer shows it whole.
+- **Tile size:** **⌘=** and **⌘−** zoom in and out, **⌘0** goes back to the default, and
+  ⌘-scrolling or pinching on a trackpad works too. The size is remembered.
 - Collapse or expand a year by selecting its heading. While you scroll through a year, its
   heading stays at the top of the gallery, so you can collapse it from there without scrolling back up.
 - **Live Photos:** an iPhone Live Photo exported as two files, such as `IMG_4330.HEIC` and
@@ -221,11 +228,13 @@ open it the first time with right-click > **Open** (or System Settings > Privacy
   are paired when they're in the same folder, share a name, and were taken within 5 seconds
   of each other. The clip isn't counted in the Video Library, the Videos filter or Library
   Insights. Moving a Live Photo to the Trash moves both files.
-- Right-click a card for **Open** and **Move to Trash**.
+- Right-click a tile for **Open** and **Move to Trash**. Hovering one shows its filename,
+  kind and capture time.
 
 ### Search the Video Library
 
-Open **Video Library** to browse every indexed video in the selected folder. The
+Open **Settings > Video Library…** (or press **⌘⇧V**) to browse every indexed video in the
+selected folder. The
 table can be searched and sorted by its visible columns. Search matches the filename,
 media type, capture timestamp, and containing folder shown in the table. Double-click
 a row, or right-click it and choose **Open Video**, to play it in the viewer.
@@ -382,6 +391,8 @@ The shortcuts below are shown for macOS. On Windows, use `Ctrl` in place of `⌘
 | Previous day | `⌘←` |
 | Next day | `⌘→` |
 | Go to today | `⌘T` |
+| Larger / smaller tiles | `⌘=` / `⌘−` |
+| Default tile size | `⌘0` |
 | Open Video Library | `⌘⇧V` |
 | Open Library Insights | `⌘⇧I` |
 | Search videos | `⌘F` |
@@ -413,7 +424,7 @@ onthisday/
 ├── core/
 │   ├── constants.py      App name, VERSION, paths, and file types
 │   ├── database.py       SQLite repository and Library Insights queries
-│   ├── gallery_layout.py Where the gallery's year headings and cards go
+│   ├── gallery_layout.py Where the gallery's year headings and square tiles go
 │   ├── indexer.py        Recursive, incremental, parallel media indexing
 │   ├── live_photos.py    Pairs a Live Photo's still with its motion clip
 │   ├── media.py          Metadata detection, thumbnails, and viewer image decoding
@@ -432,6 +443,7 @@ onthisday/
     ├── viewer_metadata.py Background reading of Info panel details
     └── widgets/          Gallery grid, photo canvas, video player, Info panel, and shared controls
 tools/make_launcher.py    macOS app / Windows Start-menu shortcut that runs this project
+tools/make_screenshots.py Regenerates the README screenshots from a synthetic demo library
 tools/build_app.py        Standalone macOS app / Windows .exe built with PyInstaller
 tests/                    Storage, indexing, date, gallery, viewer, build, and Windows tests
 .github/workflows/ci.yml  Tests on macOS and Windows, and standalone builds
