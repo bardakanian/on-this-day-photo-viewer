@@ -1,6 +1,7 @@
-from PySide6.QtCore import Signal
-from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFormLayout, QHBoxLayout, QLabel,
-                               QPushButton, QSizePolicy, QVBoxLayout)
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFormLayout,
+                               QFrame, QHBoxLayout, QLabel, QPushButton, QScrollArea, QSizePolicy, QVBoxLayout,
+                               QWidget)
 
 from ..core.metadata import format_file_size
 from ..core.preview_cache import CacheUsage
@@ -8,17 +9,32 @@ from ..core.settings import DEFAULT_PREVIEW_QUALITY, PREVIEW_HIGH, PREVIEW_STAND
 from ..core.timeformat import TIME_12_HOUR, TIME_24_HOUR
 
 
-def note(text: str) -> QLabel:
-    """An explanation under a setting. Wrapped text needs the height its width implies, or the
-    dialog opens too short and the last line is cut off."""
-    label = QLabel(text)
-    label.setProperty("muted", True)
-    label.setWordWrap(True)
-    policy = label.sizePolicy()
-    policy.setHeightForWidth(True)
-    policy.setVerticalPolicy(QSizePolicy.Policy.MinimumExpanding)
-    label.setSizePolicy(policy)
-    return label
+class Note(QLabel):
+    """An explanation under a setting.
+
+    Wrapped text needs the height its own width implies. Asking for that through the size policy
+    isn't enough on every platform: how many lines the text takes depends on the system font, so
+    the height is claimed again whenever the label is resized, and the dialog grows to fit.
+    """
+
+    def __init__(self, text: str, parent=None):
+        super().__init__(text, parent)
+        self.setProperty("muted", True)
+        self.setWordWrap(True)
+        policy = self.sizePolicy()
+        policy.setHeightForWidth(True)
+        policy.setVerticalPolicy(QSizePolicy.Policy.MinimumExpanding)
+        self.setSizePolicy(policy)
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        needed = self.heightForWidth(self.width())
+        if needed != self.minimumHeight():  # grows and shrinks, so an earlier width leaves no gap
+            self.setMinimumHeight(needed)
+
+
+def note(text: str) -> Note:
+    return Note(text)
 
 
 class PreferencesDialog(QDialog):
@@ -31,7 +47,19 @@ class PreferencesDialog(QDialog):
         self.setWindowTitle("Settings")
         self.setModal(True)
         self.setMinimumWidth(390)
-        layout = QVBoxLayout(self)
+        # The settings scroll, so a large system font or a small screen can't hide the buttons.
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+        self._scroll = scroll = QScrollArea()
+        self._sized = False
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        content = QWidget()
+        scroll.setWidget(content)
+        outer.addWidget(scroll, 1)
+        layout = QVBoxLayout(content)
         layout.setContentsMargins(24, 22, 24, 20)
         layout.setSpacing(18)
         heading = QLabel("Appearance")
@@ -109,7 +137,32 @@ class PreferencesDialog(QDialog):
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Cancel | QDialogButtonBox.StandardButton.Save)
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
-        layout.addWidget(buttons)
+        button_row = QWidget()
+        button_layout = QVBoxLayout(button_row)
+        button_layout.setContentsMargins(24, 12, 24, 16)
+        button_layout.addWidget(buttons)
+        outer.addWidget(button_row)
+        # A scroll area's own hint ignores what's inside it, so the dialog is sized from the content:
+        # a comfortable reading width, and tall enough for the settings unless the screen is smaller.
+        width = max(self.minimumWidth(), min(content.sizeHint().width(), 480))
+        needed = content.sizeHint().height() + button_row.sizeHint().height()
+        self.resize(width, min(needed, self._room_on_screen()))
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        if self._sized:
+            return
+        self._sized = True
+        # How much taller the laid-out settings are than the room they were given: wrapped text
+        # takes the height its final width needs, which is only known once it has been laid out.
+        short_by = self._scroll.widget().height() - self._scroll.viewport().height()
+        if short_by > 0:
+            self.resize(self.width(), min(self.height() + short_by, self._room_on_screen()))
+
+    @staticmethod
+    def _room_on_screen() -> int:
+        screen = QApplication.primaryScreen()
+        return round(screen.availableGeometry().height() * 0.9) if screen else 900
 
     def set_cache_usage(self, usage: CacheUsage | None, deleting: bool = False) -> None:
         """Show how much the saved previews take; None while they're being counted."""

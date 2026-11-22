@@ -10,7 +10,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from PySide6.QtWidgets import QApplication, QLabel
+from PySide6.QtGui import QFont
+from PySide6.QtWidgets import QApplication, QDialogButtonBox, QLabel
 
 from onthisday.core import settings as settings_module
 from onthisday.core.constants import HIGH_THUMBNAIL_EDGE, THUMBNAIL_EDGE
@@ -28,14 +29,32 @@ class DialogTests(unittest.TestCase):
         self.addCleanup(dialog.deleteLater)
         return dialog
 
-    def test_every_note_is_shown_in_full(self):
-        dialog = self.dialog()
+    def shown(self, **options) -> PreferencesDialog:
+        dialog = self.dialog(**options)
         dialog.show()
         APP.processEvents()
+        APP.processEvents()
+        self.addCleanup(dialog.hide)
+        return dialog
+
+    def test_every_note_is_shown_in_full(self):
+        dialog = self.shown()
         clipped = [label.text() for label in dialog.findChildren(QLabel)
                    if label.wordWrap() and label.height() < label.heightForWidth(label.width())]
         self.assertEqual(clipped, [], "the dialog opened too short, cutting off explanations")
-        dialog.hide()
+
+    def test_a_large_system_font_scrolls_rather_than_hiding_the_buttons(self):
+        was = APP.font()
+        self.addCleanup(APP.setFont, was)
+        APP.setFont(QFont(was.family(), 22))  # like a high-DPI Windows setup at 150%
+        dialog = self.shown()
+        self.assertLessEqual(dialog.height(), dialog._room_on_screen(), "taller than the screen")
+        buttons = dialog.findChild(QDialogButtonBox)
+        self.assertTrue(buttons.isVisible())
+        self.assertLessEqual(buttons.geometry().bottom(), dialog.height(), "Save and Cancel are off the dialog")
+        clipped = [label.text() for label in dialog.findChildren(QLabel)
+                   if label.wordWrap() and label.height() < label.heightForWidth(label.width())]
+        self.assertEqual(clipped, [])
 
     def test_video_library_button_asks_to_open_it_and_closes_settings(self):
         dialog = self.dialog()

@@ -11,6 +11,7 @@ import os
 import random
 import sys
 import tempfile
+from unittest.mock import patch
 from datetime import date, datetime
 from pathlib import Path
 
@@ -185,13 +186,16 @@ def main() -> int:
         from onthisday.core.preview_cache import cache_usage
         from onthisday.ui.dialogs import PreferencesDialog
 
-        dialog = PreferencesDialog(window.settings.theme, window.settings.save_previews,
-                                   window.settings.time_format, window,
-                                   auto_rescan=window.settings.auto_rescan,
-                                   preview_quality=window.settings.preview_quality)
-        dialog.set_cache_usage(cache_usage())
-        dialog.show()
-        qt_app.processEvents()
+        # The headless screen is short, so give the dialog room to show every setting at once.
+        with patch.object(PreferencesDialog, "_room_on_screen", staticmethod(lambda: 2000)):
+            dialog = PreferencesDialog(window.settings.theme, window.settings.save_previews,
+                                       window.settings.time_format, window,
+                                       auto_rescan=window.settings.auto_rescan,
+                                       preview_quality=window.settings.preview_quality)
+            dialog.set_cache_usage(cache_usage())
+            dialog.show()
+            qt_app.processEvents()
+            qt_app.processEvents()
         dialog.grab().save(str(OUTPUT / "settings.png"))
         print(f"Wrote {OUTPUT / 'settings.png'}")
         dialog.close()
