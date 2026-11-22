@@ -48,10 +48,17 @@ personal media, real library paths, or embedded metadata. Regenerate them with
 
 ### Date-based gallery
 
-Browse matching moments by year, switch between photos and videos, and manage an
-item directly from its gallery card.
+The day's photos and videos, grouped by year, as a grid of square tiles. Zoom the
+tiles larger or smaller, switch between photos and videos, and open any item full-window.
 
-![On This Day gallery with synthetic demo artwork](assets/screenshots/gallery.png)
+![On This Day gallery of square tiles, showing synthetic demo artwork grouped by year](assets/screenshots/gallery.png)
+
+### Viewer
+
+One item at a time, with zoom and pan, video playback, and an **Info** panel showing
+where its date came from, its dimensions, type, size and path.
+
+![The viewer showing a synthetic demo photo with the Info panel open](assets/screenshots/viewer.png)
 
 ### Library Insights
 
@@ -65,12 +72,20 @@ Search and sort indexed videos without leaving the desktop app.
 
 ![Video Library populated with fictional filenames and dates](assets/screenshots/video-library.png)
 
+### Settings
+
+Appearance, time format, the Video Library, automatic library checks, and how large
+saved previews are.
+
+![The Settings dialog showing appearance, time format, library and preview options](assets/screenshots/settings.png)
+
 ## How it works
 
 1. Choose the folder containing your photo and video library.
 2. The app recursively scans supported media and stores file details and detected
-   capture dates in a local SQLite index. High-resolution previews are cached for
-   sharp display, while compatible legacy thumbnails can appear as placeholders.
+   capture dates in a local SQLite index. A preview of each item is cached for sharp
+   display, at the size chosen in **Settings > Preview quality**; the other size stands
+   in while a preview is being made.
 3. The gallery queries that index for media captured on the selected month and day,
    then groups the results from newest to oldest year.
 4. Later scans reuse unchanged records, update changed files, and remove index
@@ -165,7 +180,7 @@ python app.py
 ```
 
 On first launch, choose a folder containing photos and videos. The selected folder,
-appearance preference, SQLite index, thumbnail cache, and application log are kept
+appearance preference, SQLite index, preview cache, and application log are kept
 in the local app-data directory described below.
 
 ### 5. Optional: add it to Applications (macOS) or the Start menu (Windows)
@@ -260,8 +275,9 @@ and buttons for **Info**, **Open in Default App** and **Move to Trash**.
   and codec. The panel stays open as you step through items; details are read only
   while it is open.
 
-**Photos** open with their EXIF rotation applied, fitted to the window. The gallery
-thumbnail appears at once, and a screen-sized version replaces it a moment later.
+**Photos** open with their EXIF rotation applied, fitted to the window, and whole: the
+square crop belongs to the gallery, not the viewer. The saved preview appears at once,
+and a screen-sized version replaces it a moment later.
 
 - **Zoom:** hold **⌘** and scroll, pinch on a trackpad, or press **⌘=** and **⌘−**.
   Zoom follows the pointer.
@@ -299,7 +315,7 @@ earliest calendar day, year, or month is selected consistently.
 
 ### Move media to Trash
 
-Each gallery card includes **Move to Trash**, and so does the viewer (**⌘⌫**). The
+Right-click a tile for **Move to Trash**; the viewer has a button and **⌘⌫**. The
 app shows the exact filename and requires confirmation before asking the operating
 system to move the original file to Trash. In the viewer, playback stops first so the
 file can be moved, and the next item is shown afterwards. After a successful move, the matching SQLite record and cached
@@ -427,18 +443,20 @@ onthisday/
 │   ├── gallery_layout.py Where the gallery's year headings and square tiles go
 │   ├── indexer.py        Recursive, incremental, parallel media indexing
 │   ├── live_photos.py    Pairs a Live Photo's still with its motion clip
-│   ├── media.py          Metadata detection, thumbnails, and viewer image decoding
+│   ├── media.py          Metadata detection, previews, and viewer image decoding
 │   ├── metadata.py       Details for the viewer's Info panel (dimensions, video codec, …)
 │   ├── models.py         Shared immutable data models
 │   ├── preview_cache.py  Size of the saved previews, and deleting them
 │   ├── progress.py       Time-left estimates for scans and saving previews
 │   ├── settings.py       Local configuration persistence
 │   ├── thumbnail_warmer.py Saves a preview of every item in the background
-│   ├── workqueue.py      Background job queues for thumbnails and the viewer
+│   ├── timeformat.py     12-hour and 24-hour capture times
+│   ├── workqueue.py      Background job queues for previews and the viewer
 │   └── zoom.py           Zoom and pan arithmetic for the photo viewer
 └── ui/
     ├── pages/            Gallery, Video Library, Library Insights, and the viewer
     ├── theme/            Color palettes, typography, metrics, and stylesheets
+    ├── notifications.py  "Scan finished" notifications for long background jobs
     ├── viewer_images.py  Background photo decoding with neighbour prefetch
     ├── viewer_metadata.py Background reading of Info panel details
     └── widgets/          Gallery grid, photo canvas, video player, Info panel, and shared controls

@@ -19,6 +19,7 @@ from onthisday.core.gallery_layout import (
 )
 from onthisday.core.models import MediaRecord
 from onthisday.ui.pages.gallery_page import GalleryPage
+from tests.test_auto_refresh import WindowTestCase
 
 APP = QApplication.instance() or QApplication([])
 
@@ -242,6 +243,31 @@ class GridTests(unittest.TestCase):
         self.assertEqual(self.page.results.currentIndex(), 1)
         self.assertEqual(self.page.empty.title_label.text(), "No photos for May 3")
         self.assertFalse(self.page.empty.button.isVisibleTo(self.page.empty))
+
+
+class TileShortcutTests(WindowTestCase):
+    """The tile-size keys are the viewer's photo-zoom keys, so only one owns them at a time."""
+
+    def enabled(self) -> list[bool]:
+        return [action.isEnabled() for action in self.window.tile_actions]
+
+    def test_the_viewer_keeps_the_zoom_keys_while_it_is_open(self):
+        self.assertEqual(self.enabled(), [True] * 3)  # the gallery is showing
+        self.window.stack.setCurrentWidget(self.window.viewer)
+        self.assertEqual(self.enabled(), [False] * 3, "both would swallow the shortcut, so neither acts")
+        self.window.stack.setCurrentWidget(self.window.gallery)
+        self.assertEqual(self.enabled(), [True] * 3)
+
+    def test_the_menu_actions_resize_tiles(self):
+        larger, smaller, default = self.window.tile_actions
+        before = self.window.gallery.grid.tile_size
+        larger.trigger()
+        self.assertGreater(self.window.gallery.grid.tile_size, before)
+        smaller.trigger()
+        self.assertEqual(self.window.gallery.grid.tile_size, before)
+        larger.trigger()
+        default.trigger()
+        self.assertEqual(self.window.gallery.grid.tile_size, DEFAULT_TILE)
 
 
 if __name__ == "__main__":

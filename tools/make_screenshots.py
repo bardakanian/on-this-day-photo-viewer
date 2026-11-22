@@ -20,8 +20,10 @@ WINDOW_SIZE = (1440, 900)
 DEMO_DAY = (4, 18)  # the day the gallery shows, so the pictures are reproducible
 LIBRARY_NAME = "Demo Library"
 
-# App data and the library live in a throwaway home, set before the app's constants are imported.
+# App data lives in a throwaway home, set before the app's constants are imported. The library
+# sits at a short, obviously made-up path, since the viewer's Info panel shows the full path.
 WORK = Path(tempfile.mkdtemp(prefix="onthisday-shots-"))
+DEMO_ROOT = Path("/tmp/on-this-day-demo") if os.name != "nt" else WORK / "demo"
 os.environ["HOME"] = os.environ["USERPROFILE"] = str(WORK)
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 sys.path.insert(0, str(PROJECT))
@@ -116,14 +118,15 @@ def capture(window, app, name: str) -> None:
 
 def main() -> int:
     import json
+    import shutil
 
-    library = WORK / LIBRARY_NAME
+    library = DEMO_ROOT / LIBRARY_NAME
+    shutil.rmtree(DEMO_ROOT, ignore_errors=True)  # the tool owns this folder; start clean
     build_library(library)
     app_dir = WORK / ".on_this_day_photo_viewer"
     app_dir.mkdir(parents=True, exist_ok=True)
     # A relative folder keeps real paths out of the status bar; the app resolves it from here.
-    os.chdir(WORK)
-    (app_dir / "config.json").write_text(json.dumps({"photo_folder": LIBRARY_NAME, "theme": "light"}))
+    (app_dir / "config.json").write_text(json.dumps({"photo_folder": str(library), "theme": "light"}))
 
     sys.argv = ["app"]
     import app as application
@@ -166,6 +169,32 @@ def main() -> int:
     def insights() -> None:
         window.status.setText("Library Insights from fictional demo data")
         capture(window, qt_app, "library-insights")
+        window.show_gallery()
+        photo = next(record for record in window.gallery.records if not record.is_video)
+        window._open_from_gallery(photo)
+        window.viewer.info_button.setChecked(True)
+        QTimer.singleShot(2500, viewer)
+
+    def viewer() -> None:
+        window.status.setText("Viewing a fictional demo photo")
+        capture(window, qt_app, "viewer")
+        window.viewer.close_viewer()
+        QTimer.singleShot(400, settings)
+
+    def settings() -> None:
+        from onthisday.core.preview_cache import cache_usage
+        from onthisday.ui.dialogs import PreferencesDialog
+
+        dialog = PreferencesDialog(window.settings.theme, window.settings.save_previews,
+                                   window.settings.time_format, window,
+                                   auto_rescan=window.settings.auto_rescan,
+                                   preview_quality=window.settings.preview_quality)
+        dialog.set_cache_usage(cache_usage())
+        dialog.show()
+        qt_app.processEvents()
+        dialog.grab().save(str(OUTPUT / "settings.png"))
+        print(f"Wrote {OUTPUT / 'settings.png'}")
+        dialog.close()
         window.close()
         qt_app.quit()
 

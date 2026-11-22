@@ -119,6 +119,7 @@ class MainWindow(QMainWindow):
         self.stop_event = threading.Event()
         self.active_scan_id = 0
         self.pending_index_start = False
+        self.tile_actions = []  # the View menu's tile-size actions, built with the menus
         # Scans started by the app itself (on return) stay quiet about an unplugged drive.
         self.scan_is_automatic = False
         # Starts at launch, so returning to the app re-checks the library only after a real while.
@@ -308,15 +309,16 @@ class MainWindow(QMainWindow):
         insights.triggered.connect(self.show_insights)
         view_menu.addAction(insights)
         view_menu.addSeparator()
-        larger = QAction("Larger Tiles", self, shortcut=QKeySequence("Ctrl+="))
-        larger.triggered.connect(self.gallery.grid.zoom_in)
-        view_menu.addAction(larger)
-        smaller = QAction("Smaller Tiles", self, shortcut=QKeySequence("Ctrl+-"))
-        smaller.triggered.connect(self.gallery.grid.zoom_out)
-        view_menu.addAction(smaller)
-        default_tiles = QAction("Default Tile Size", self, shortcut=QKeySequence("Ctrl+0"))
-        default_tiles.triggered.connect(self.gallery.grid.reset_zoom)
-        view_menu.addAction(default_tiles)
+        # The viewer zooms the photo with the same keys, so these are turned off while it is open;
+        # a disabled action leaves the shortcut to the viewer instead of both swallowing it.
+        self.tile_actions = []
+        for title, keys, slot in (("Larger Tiles", "Ctrl+=", self.gallery.grid.zoom_in),
+                                  ("Smaller Tiles", "Ctrl+-", self.gallery.grid.zoom_out),
+                                  ("Default Tile Size", "Ctrl+0", self.gallery.grid.reset_zoom)):
+            action = QAction(title, self, shortcut=QKeySequence(keys))
+            action.triggered.connect(slot)
+            view_menu.addAction(action)
+            self.tile_actions.append(action)
         view_menu.addSeparator()
         search = QAction("Search Videos", self, shortcut=QKeySequence.StandardKey.Find)
         search.triggered.connect(self.focus_search)
@@ -498,6 +500,8 @@ class MainWindow(QMainWindow):
 
     def _page_changed(self, index: int) -> None:
         page = self.stack.widget(index)
+        for action in self.tile_actions:
+            action.setEnabled(page is self.gallery)
         self.date_navigation.setVisible(page is self.gallery)
         self.toolbar.setVisible(page is not self.viewer)
         if page is not self.viewer:
