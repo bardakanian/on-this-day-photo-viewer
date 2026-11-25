@@ -2,6 +2,11 @@
 
 With every change, bump `VERSION` in `onthisday/core/constants.py` and add an entry here.
 
+## 1.18.1 — 2026-11-24
+
+- Fix: installing the app no longer leaves a second copy of it behind in the project folder. The installer built the bundle in `dist/` and then copied it into Applications, so every install produced an identical twin that duplicate scanners flagged. It now builds in a temporary folder that is discarded after installing. `--no-install` still writes to `dist/` as before.
+- Fix: a bundle left in `dist/` under an older app name is now removed on the next build instead of lingering forever.
+
 ## 1.18.0 — 2026-11-21
 
 - The gallery is a grid of square tiles, like Photos: each picture fills its tile, with no filename, folder or buttons in the way. **⌘=** and **⌘−** zoom (so do ⌘-scroll and pinch), **⌘0** goes back to the default, and the size is remembered. Right-click a tile for Open and Move to Trash; hovering shows its name and time.

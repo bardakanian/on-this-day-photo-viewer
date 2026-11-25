@@ -138,6 +138,25 @@ exec "$PYTHON" "$APP" >>{log_dir}/launcher.log 2>&1
 """
 
 
+def is_our_bundle(bundle: Path) -> bool:
+    try:
+        with open(bundle / "Contents" / "Info.plist", "rb") as handle:
+            return plistlib.load(handle).get("CFBundleIdentifier") == BUNDLE_ID
+    except (OSError, plistlib.InvalidFileException):
+        return False
+
+
+def clear_stale_bundles(output_dir: Path, keep: Path) -> None:
+    """Remove earlier bundles of this app left in output_dir under another name.
+
+    build() only replaces the bundle it is about to write, so renaming the app
+    used to strand the old one here forever.
+    """
+    for candidate in sorted(output_dir.glob("*.app")):
+        if candidate != keep and is_our_bundle(candidate):
+            shutil.rmtree(candidate, ignore_errors=True)
+
+
 def build(output_dir: Path) -> Path:
     python = PROJECT / ".venv" / "bin" / "python"
     app = PROJECT / "app.py"
@@ -145,6 +164,7 @@ def build(output_dir: Path) -> Path:
         sys.exit(f"No virtual environment at {python}. Create it first (see README).")
 
     bundle = output_dir / f"{APP_NAME}.app"
+    clear_stale_bundles(output_dir, keep=bundle)
     if bundle.exists():
         shutil.rmtree(bundle)
     contents = bundle / "Contents"
@@ -261,14 +281,20 @@ def main() -> None:
         return
     if sys.platform != "darwin":
         sys.exit("The launcher is for macOS and Windows. On other systems, run: python app.py")
-    bundle = build(PROJECT / "dist")
-    print(f"Built {bundle}")
-    if not args.no_install:
-        applications = Path.home() / "Applications" if args.user else Path("/Applications")
+    if args.no_install:
+        bundle = build(PROJECT / "dist")
+        print(f"Built {bundle}")
+        return
+    applications = Path.home() / "Applications" if args.user else Path("/Applications")
+    # Stage in a temporary folder so installing leaves no duplicate behind.
+    with tempfile.TemporaryDirectory() as staging:
+        bundle = build(Path(staging))
+        print(f"Built {APP_NAME}.app")
         try:
-            print(f"Installed {install(bundle, applications)}")
+            target = install(bundle, applications)
         except PermissionError:
             sys.exit(f"No permission to write to {applications}. Try: python tools/make_launcher.py --user")
+    print(f"Installed {target}")
 
 
 if __name__ == "__main__":
