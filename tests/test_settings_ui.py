@@ -74,7 +74,7 @@ class DialogTests(unittest.TestCase):
 
 class StoredSettingsTests(unittest.TestCase):
     def test_quality_and_tile_size_are_remembered(self):
-        with tempfile.TemporaryDirectory() as temp:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temp:
             config = Path(temp) / "config.json"
             with patch.object(settings_module, "CONFIG_FILE", config), \
                     patch.object(settings_module, "APP_DIR", Path(temp)), \

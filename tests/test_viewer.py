@@ -57,7 +57,7 @@ class ZoomStateTests(unittest.TestCase):
 
 class DisplayImageTests(unittest.TestCase):
     def setUp(self):
-        self.temp = tempfile.TemporaryDirectory()
+        self.temp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         self.root = Path(self.temp.name)
 
     def tearDown(self):

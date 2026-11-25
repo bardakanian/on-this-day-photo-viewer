@@ -45,7 +45,7 @@ class VersionTests(unittest.TestCase):
         spec = importlib.util.spec_from_file_location("make_launcher", PROJECT / "tools" / "make_launcher.py")
         launcher = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(launcher)
-        with tempfile.TemporaryDirectory() as temp:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temp:
             project = Path(temp)
             (project / ".venv" / "bin").mkdir(parents=True)
             (project / ".venv" / "bin" / "python").touch()
