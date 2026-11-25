@@ -32,7 +32,7 @@ APP = QApplication.instance() or QApplication([])
 
 class IsolatedAppData(unittest.TestCase):
     def setUp(self):
-        self.temp = tempfile.TemporaryDirectory()
+        self.temp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         self.root = Path(self.temp.name)
         self.app_dir = self.root / "app-data"
         self.thumbnails = self.app_dir / "thumbnails"

@@ -2,6 +2,10 @@
 
 With every change, bump `VERSION` in `onthisday/core/constants.py` and add an entry here.
 
+## 1.18.2 — 2026-11-25
+
+- Fix: the Windows test run failed at random on a temporary folder it could not delete. Windows refuses to remove a file that is still open, and the index database could still be held for a moment after a test closed it, so the cleanup raised `PermissionError` and the run failed even though every test had passed. Tests now ignore errors when removing their temporary folder, as `test_viewer_ui` already did.
+
 ## 1.18.1 — 2026-11-24
 
 - Fix: installing the app no longer leaves a second copy of it behind in the project folder. The installer built the bundle in `dist/` and then copied it into Applications, so every install produced an identical twin that duplicate scanners flagged. It now builds in a temporary folder that is discarded after installing. `--no-install` still writes to `dist/` as before.

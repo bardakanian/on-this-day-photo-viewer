@@ -26,7 +26,7 @@ INSERT_ROW = """
 
 class StorageTests(unittest.TestCase):
     def setUp(self):
-        self.temp = tempfile.TemporaryDirectory()
+        self.temp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         self.root = Path(self.temp.name)
         self.app_dir = self.root / "app-data"
         self.db_file = self.app_dir / "photo_index.sqlite3"
@@ -432,7 +432,7 @@ class CopiedFileDateTests(unittest.TestCase):
     """
 
     def setUp(self):
-        self.temp = tempfile.TemporaryDirectory()
+        self.temp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         self.root = Path(self.temp.name).resolve()
 
     def tearDown(self):
@@ -491,7 +491,7 @@ class PlaceholderDateTests(unittest.TestCase):
             self.assertFalse(media.is_placeholder_date(value), value)
 
     def test_unset_camera_clock_falls_back_to_file_time(self):
-        with tempfile.TemporaryDirectory() as temp:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temp:
             path = Path(temp) / "IMG_7469.JPG"
             exif = Image.Exif()
             exif[306] = "1980:01:01 00:00:06"  # what a camera with an unset clock writes

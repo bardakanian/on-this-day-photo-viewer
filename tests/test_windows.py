@@ -30,7 +30,7 @@ class ConsoleWindowTests(unittest.TestCase):
     @unittest.skipUnless(media.FFMPEG_ENABLED, "ffmpeg not installed")
     def test_every_ffmpeg_call_hides_its_console(self):
         finished = subprocess.CompletedProcess([], 0, "", "")
-        with tempfile.TemporaryDirectory() as temp, \
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temp, \
                 patch.object(media, "_NO_CONSOLE", CREATE_NO_WINDOW), \
                 patch.object(media.subprocess, "run", return_value=finished) as run:
             source = Path(temp) / "clip.mp4"
@@ -44,7 +44,7 @@ class ConsoleWindowTests(unittest.TestCase):
 
 class WindowsShortcutTests(unittest.TestCase):
     def setUp(self):
-        self.temp = tempfile.TemporaryDirectory()
+        self.temp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         self.root = Path(self.temp.name)
         self.project = self.root / "OnThisDay"
         (self.project / ".venv" / "Scripts").mkdir(parents=True)

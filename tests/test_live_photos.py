@@ -69,7 +69,7 @@ class PairingTests(unittest.TestCase):
 
 class IndexTests(unittest.TestCase):
     def setUp(self):
-        self.temp = tempfile.TemporaryDirectory()
+        self.temp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         self.root = Path(self.temp.name)
         self.app_dir = self.root / "app-data"
         self.patches = [
@@ -211,7 +211,7 @@ class IndexTests(unittest.TestCase):
 
 class ViewerTests(unittest.TestCase):
     def setUp(self):
-        self.temp = tempfile.TemporaryDirectory()
+        self.temp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         root = Path(self.temp.name)
         self.live = ViewerItem(root / "IMG_1.HEIC", datetime(2023, 5, 14), "image", 1, 1, root / "IMG_1.MOV")
         self.plain = ViewerItem(root / "IMG_2.JPG", datetime(2023, 5, 14), "image", 1, 1)

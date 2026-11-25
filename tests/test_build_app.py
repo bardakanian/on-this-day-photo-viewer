@@ -30,7 +30,7 @@ class BuildAppTests(unittest.TestCase):
         self.assertIn("--windowed", arguments)
 
     def test_mac_bundle_carries_the_version_and_is_re_signed(self):
-        with tempfile.TemporaryDirectory() as temp:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temp:
             bundle = Path(temp) / f"{APP_NAME}.app"
             (bundle / "Contents").mkdir(parents=True)
             with open(bundle / "Contents" / "Info.plist", "wb") as handle:
@@ -43,7 +43,7 @@ class BuildAppTests(unittest.TestCase):
         self.assertEqual(run.call_args.args[0][:2], ["codesign", "--force"])
 
     def test_windows_archive_is_named_after_version_and_platform(self):
-        with tempfile.TemporaryDirectory() as temp:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temp:
             built = Path(temp) / "standalone" / APP_NAME
             built.mkdir(parents=True)
             (built / f"{APP_NAME}.exe").write_bytes(b"MZ")

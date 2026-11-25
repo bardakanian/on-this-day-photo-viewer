@@ -27,7 +27,7 @@ class WindowTestCase(unittest.TestCase):
     unplugged_at_launch = False
 
     def setUp(self):
-        self.temp = tempfile.TemporaryDirectory()
+        self.temp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         root = Path(self.temp.name)
         app_dir = root / "app-data"
         self.library = root / "library"
@@ -219,14 +219,14 @@ class RefreshAfterScanTests(WindowTestCase):
 
 class SettingsTests(unittest.TestCase):
     def test_missing_folder_is_remembered(self):
-        with tempfile.TemporaryDirectory() as temp:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temp:
             config = Path(temp) / "config.json"
             config.write_text('{"photo_folder": "/Volumes/Unplugged Drive/Photos"}')
             with patch.object(settings, "CONFIG_FILE", config):
                 self.assertEqual(SettingsStore().load().photo_folder, Path("/Volumes/Unplugged Drive/Photos"))
 
     def test_auto_rescan_defaults_on_and_round_trips(self):
-        with tempfile.TemporaryDirectory() as temp:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temp:
             app_dir = Path(temp)
             with patch.object(settings, "APP_DIR", app_dir), \
                     patch.object(settings, "CONFIG_FILE", app_dir / "config.json"), \

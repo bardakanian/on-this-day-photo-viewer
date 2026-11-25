@@ -50,7 +50,7 @@ class FormatTests(unittest.TestCase):
 
 class SettingTests(unittest.TestCase):
     def setUp(self):
-        temp = tempfile.TemporaryDirectory()
+        temp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         self.addCleanup(temp.cleanup)
         self.app_dir = Path(temp.name)
         self.config = self.app_dir / "config.json"

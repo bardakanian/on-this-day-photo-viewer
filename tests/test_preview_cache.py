@@ -24,7 +24,7 @@ APP = QApplication.instance() or QApplication([])
 
 class CacheTests(unittest.TestCase):
     def setUp(self):
-        self.temp = tempfile.TemporaryDirectory()
+        self.temp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         self.thumbnails = Path(self.temp.name) / "thumbnails"
         self.patch = patch.object(media, "THUMBNAIL_DIR", self.thumbnails)
         self.patch.start()
@@ -66,7 +66,7 @@ class ClipPreviewPruneTests(unittest.TestCase):
     """A scan deletes the previews of Live Photo clips, which are never shown on their own."""
 
     def setUp(self):
-        self.temp = tempfile.TemporaryDirectory()
+        self.temp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         root = Path(self.temp.name)
         app_dir = root / "app-data"
         self.patches = [
@@ -213,7 +213,7 @@ class UpgradeRaceTests(unittest.TestCase):
     """Several threads opening an index from before Live Photos at once must not fail."""
 
     def test_concurrent_first_opens(self):
-        with tempfile.TemporaryDirectory() as temp:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temp:
             app_dir = Path(temp)
             with patch.object(database, "APP_DIR", app_dir), \
                     patch.object(database, "DB_FILE", app_dir / "index.sqlite3"), \

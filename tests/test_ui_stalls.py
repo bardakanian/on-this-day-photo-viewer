@@ -109,7 +109,7 @@ class GalleryPaintTests(unittest.TestCase):
     """Drawing tiles must not touch the file system: on Windows that cost a third of a second a redraw."""
 
     def setUp(self):
-        temp = tempfile.TemporaryDirectory()
+        temp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         self.addCleanup(temp.cleanup)
         self.root = Path(temp.name).resolve()
         self.grid = GalleryGrid()
